@@ -280,10 +280,11 @@ v1.2.3 → 1.2.3-beta.0 (@beta)     # Safe testing
 
 | npm Tag | Use Case | Risk Level |
 |---------|----------|------------|
+| `latest` | Production releases | ❌ High (default install) |
 | `beta` | Testing releases | ⚠️ Medium (visible tag) |
 | `alpha` | Early testing | ⚠️ Medium (visible tag) |
-| `dev` | Development builds | ✅ Low (custom tag) |
-| `latest` | Production releases | ❌ High (default install) |
+| `rc` | Release candidates | ⚠️ Medium (visible tag) |
+| `dev` | Development builds | ✅ Low (experimental) |
 
 **Note**: All tags have identical unpublish restrictions (72-hour rule). Risk level refers to mistake impact.
 

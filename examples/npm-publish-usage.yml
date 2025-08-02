@@ -14,7 +14,7 @@ on:
         required: true
         default: 'v0.1.0'
       npm_tag:
-        description: 'npm dist-tag (latest, beta, alpha, rc)'
+        description: 'npm dist-tag (latest, beta, alpha, rc, dev)'
         required: false
         default: 'beta'
 
@@ -80,6 +80,7 @@ jobs:
       # Smart tag mapping based on TAG_STRATEGY.md
       npm_dist_tag: ${{ 
         github.event.release.prerelease == true && (
+          contains(github.event.release.tag_name, 'dev') && 'dev' ||
           contains(github.event.release.tag_name, 'alpha') && 'alpha' ||
           contains(github.event.release.tag_name, 'beta') && 'beta' ||
           contains(github.event.release.tag_name, 'rc') && 'rc' ||
@@ -126,6 +127,7 @@ jobs:
       
       # Smart tag mapping based on GitHub tag (manual mode)
       npm_dist_tag: ${{ 
+        contains(github.ref_name, 'dev') && 'dev' ||
         contains(github.ref_name, 'alpha') && 'alpha' ||
         contains(github.ref_name, 'beta') && 'beta' ||
         contains(github.ref_name, 'rc') && 'rc' ||
@@ -348,3 +350,78 @@ jobs:
       
     secrets:
       NPM_TOKEN: ${{ secrets.COMPANY_NPM_TOKEN }}
+
+---
+
+# Development workflow with dev tag
+name: Development npm Publishing
+
+on:
+  push:
+    tags:
+      - 'v*-dev*'  # Match tags like v1.0.0-dev.1
+
+jobs:
+  rust-release:
+    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
+    with:
+      binary_name: 'dev-cli'
+      release-tag: ${{ github.ref_name }}
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  npm-publish-dev:
+    needs: rust-release
+    uses: xctions/rust-release/.github/workflows/npm-publish.yml@v2
+    with:
+      source_tag: ${{ github.ref_name }}
+      package_name: 'dev-cli'
+      
+      # Always use dev tag for development releases
+      npm_dist_tag: 'dev'
+      
+      package_description: 'Development version of CLI tool - UNSTABLE'
+      package_keywords: 'cli,dev,experimental,unstable'
+      
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+---
+
+# Complete tag mapping example
+name: Complete Tag Strategy
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  npm-publish:
+    if: github.event.release.draft == false
+    uses: xctions/rust-release/.github/workflows/npm-publish.yml@v2
+    with:
+      source_tag: ${{ github.event.release.tag_name }}
+      package_name: 'complete-cli'
+      
+      # Complete smart mapping with all supported tags
+      npm_dist_tag: ${{ 
+        github.event.release.prerelease == true && (
+          contains(github.event.release.tag_name, 'dev') && 'dev' ||
+          contains(github.event.release.tag_name, 'alpha') && 'alpha' ||
+          contains(github.event.release.tag_name, 'beta') && 'beta' ||
+          contains(github.event.release.tag_name, 'rc') && 'rc' ||
+          'beta'
+        ) || 'latest'
+      }}
+      
+      package_description: 'CLI tool with complete tag strategy'
+      
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+# Example tag mappings:
+# v1.0.0          (release)    → @latest
+# v1.0.0-dev.1    (prerelease) → @dev
+# v1.0.0-alpha.1  (prerelease) → @alpha  
+# v1.0.0-beta.1   (prerelease) → @beta
+# v1.0.0-rc.1     (prerelease) → @rc

@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       npm_dist_tag:
-        description: 'npm dist-tag (latest, beta, alpha, rc) - REQUIRED for safety'
+        description: 'npm dist-tag (latest, beta, alpha, rc, dev) - REQUIRED for safety'
         required: true
         type: string
       binary_name:
@@ -91,12 +91,12 @@ jobs:
           
           # Validate npm dist-tag is safe
           case "$NPM_DIST_TAG" in
-            latest|beta|alpha|rc)
+            latest|beta|alpha|rc|dev)
               echo "Valid npm dist-tag: $NPM_DIST_TAG"
               ;;
             *)
               echo "Error: Invalid npm dist-tag: $NPM_DIST_TAG"
-              echo "Allowed values: latest, beta, alpha, rc"
+              echo "Allowed values: latest, beta, alpha, rc, dev"
               exit 1
               ;;
           esac
@@ -104,7 +104,7 @@ jobs:
           # Safety check: prerelease versions should not use 'latest' tag
           if [[ "$IS_PRERELEASE" == "true" && "$NPM_DIST_TAG" == "latest" ]]; then
             echo "Error: Prerelease version $NPM_VERSION cannot use 'latest' tag"
-            echo "Use beta, alpha, or rc for prerelease versions"
+            echo "Use beta, alpha, rc, or dev for prerelease versions"
             exit 1
           fi
           

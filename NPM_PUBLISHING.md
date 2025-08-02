@@ -37,8 +37,8 @@ This guide covers how to extend the rust-release workflow to publish your Rust b
 | `latest` | Default stable release | `npm install pkg` | 🔴 Very High (default install) |
 | `beta` | Beta testing | `npm install pkg@beta` | 🟡 Medium (visible, commonly used) |
 | `alpha` | Alpha testing | `npm install pkg@alpha` | 🟡 Medium (visible, commonly used) |
-| `next` | Next major version preview | `npm install pkg@next` | 🟡 Medium (visible, commonly used) |
-| `dev` | Development builds | `npm install pkg@dev` | 🟢 Low (custom, less visible) |
+| `rc` | Release candidates | `npm install pkg@rc` | 🟡 Medium (visible, commonly used) |
+| `dev` | Development builds | `npm install pkg@dev` | 🟢 Low (experimental, unstable) |
 | `experimental` | Experimental features | `npm install pkg@experimental` | 🟢 Low (custom, less visible) |
 
 **Note**: Unpublish restrictions are IDENTICAL for all tags. Risk level refers to impact of mistakes, not unpublish difficulty.
@@ -160,6 +160,7 @@ npm-publish:
 | GitHub Release | npm Version | npm Tag | Risk Level |
 |---------------|-------------|---------|------------|
 | `v1.2.3` | `1.2.3-beta.0` | `beta` | 🟢 Low |
+| `v1.2.3-dev` | `1.2.3-dev.0` | `dev` | 🟢 Very Low |
 | `v1.2.3-alpha` | `1.2.3-alpha.0` | `alpha` | 🟢 Low |
 | `v1.2.3-stable` | `1.2.3` | `latest` | 🔴 High |
 
@@ -170,6 +171,7 @@ npm-publish:
 | `v1.2.3` | `1.2.3` | `latest` | 🔴 High |
 | `v1.2.3-beta` | `1.2.3-beta.0` | `beta` | 🟢 Low |
 | `v1.2.3-alpha` | `1.2.3-alpha.0` | `alpha` | 🟢 Low |
+| `v1.2.3-dev` | `1.2.3-dev.0` | `dev` | 🟢 Very Low |
 
 ## 🛡️ Best Practices
 
