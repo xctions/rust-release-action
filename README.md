@@ -46,7 +46,6 @@ jobs:
 |-------|-------------|----------|---------|
 | `binary-name` | Binary name | No | Repository name |
 | `release-tag` | Release tag to create | Yes | |
-| `include` | JSON array of custom platforms | No | Default matrix |
 | `exclude` | Comma-separated platforms to exclude | No | |
 | `rust-version` | Rust version to use | No | `stable` |
 | `cargo-args` | Additional cargo build arguments | No | `--release` |
@@ -58,18 +57,12 @@ jobs:
 **Default Matrix:**
 - `linux-x86_64` - Linux x86_64 (GNU)
 - `linux-arm64` - Linux ARM64 (GNU)
+- `linux-x86_64-musl` - Linux x86_64 (musl)
+- `linux-arm64-musl` - Linux ARM64 (musl)
 - `mac-x86_64` - macOS Intel
 - `mac-arm64` - macOS Apple Silicon
 - `windows-x86_64` - Windows x86_64 (MSVC)
 - `windows-arm64` - Windows ARM64 (MSVC)
-
-**Extended Support** (via custom `include`):
-- `linux-i686` - 32-bit Linux
-- `linux-armv7` - ARMv7 Linux
-- `linux-x86_64-musl` - Linux x86_64 (musl)
-- `linux-arm64-musl` - Linux ARM64 (musl)
-- `windows-x86_64-gnu` - Windows x86_64 (MinGW)
-- `windows-i686` - 32-bit Windows
 
 ## 📚 Examples
 
@@ -110,19 +103,14 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### Custom Platform Matrix
+### Selective Platform Builds
 ```yaml
 jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
       # Uses repository name as binary name
-      include: |
-        [
-          {"target": "x86_64-unknown-linux-gnu", "os": "ubuntu-latest", "platform": "linux-x86_64"},
-          {"target": "x86_64-unknown-linux-musl", "os": "ubuntu-latest", "platform": "linux-x86_64-musl"},
-          {"target": "aarch64-apple-darwin", "os": "macos-latest", "platform": "mac-arm64"}
-        ]
+      exclude: 'linux-arm64,windows-arm64,mac-x86_64'  # Build only x86_64 + mac-arm64
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
