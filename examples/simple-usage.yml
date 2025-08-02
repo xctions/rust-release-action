@@ -13,6 +13,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: xctions/rust-release@v1
         with:
-          # binary_name is optional - uses repository name by default
+          # binary-name is optional - uses repository name by default
           release-tag: ${{ github.ref_name }}
           github-token: ${{ secrets.GITHUB_TOKEN }}

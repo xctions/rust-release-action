@@ -18,8 +18,8 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      # Build multiple binaries from the same repository
-      binaries: 'my-app,my-cli,my-daemon'
+      # Build single binary (multi-binary support removed for simplicity)
+      binary-name: 'my-app'
       
       # Use workflow input or tag name
       release-tag: ${{ github.event.inputs.version || github.ref_name }}

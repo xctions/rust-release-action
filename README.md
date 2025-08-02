@@ -34,7 +34,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      # binary_name is optional - uses repository name by default
+      # binary-name is optional - uses repository name by default
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -44,9 +44,8 @@ jobs:
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `binary_name` | Binary name | No | Repository name |
+| `binary-name` | Binary name | No | Repository name |
 | `release-tag` | Release tag to create | Yes | |
-| `include` | JSON array of custom platforms | No | Default matrix |
 | `exclude` | Comma-separated platforms to exclude | No | |
 | `rust-version` | Rust version to use | No | `stable` |
 | `cargo-args` | Additional cargo build arguments | No | `--release` |
@@ -58,18 +57,12 @@ jobs:
 **Default Matrix:**
 - `linux-x86_64` - Linux x86_64 (GNU)
 - `linux-arm64` - Linux ARM64 (GNU)
+- `linux-x86_64-musl` - Linux x86_64 (musl)
+- `linux-arm64-musl` - Linux ARM64 (musl)
 - `mac-x86_64` - macOS Intel
 - `mac-arm64` - macOS Apple Silicon
 - `windows-x86_64` - Windows x86_64 (MSVC)
 - `windows-arm64` - Windows ARM64 (MSVC)
-
-**Extended Support** (via custom `include`):
-- `linux-i686` - 32-bit Linux
-- `linux-armv7` - ARMv7 Linux
-- `linux-x86_64-musl` - Linux x86_64 (musl)
-- `linux-arm64-musl` - Linux ARM64 (musl)
-- `windows-x86_64-gnu` - Windows x86_64 (MinGW)
-- `windows-i686` - 32-bit Windows
 
 ## 📚 Examples
 
@@ -79,7 +72,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      # No binary_name specified - uses repository name automatically
+      # No binary-name specified - uses repository name automatically
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -91,7 +84,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binary_name: 'my-custom-app'
+      binary-name: 'my-custom-app'
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -110,19 +103,14 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### Custom Platform Matrix
+### Selective Platform Builds
 ```yaml
 jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
       # Uses repository name as binary name
-      include: |
-        [
-          {"target": "x86_64-unknown-linux-gnu", "os": "ubuntu-latest", "platform": "linux-x86_64"},
-          {"target": "x86_64-unknown-linux-musl", "os": "ubuntu-latest", "platform": "linux-x86_64-musl"},
-          {"target": "aarch64-apple-darwin", "os": "macos-latest", "platform": "mac-arm64"}
-        ]
+      exclude: 'linux-arm64,windows-arm64,mac-x86_64'  # Build only x86_64 + mac-arm64
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -134,7 +122,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binary_name: 'my-custom-app'  # Override repository name
+      binary-name: 'my-custom-app'  # Override repository name
       release-tag: ${{ github.ref_name }}
       rust-version: '1.75.0'
       cargo-args: '--release --locked --no-default-features --features production'
@@ -218,7 +206,7 @@ The new v2 reusable workflow replaces the composite action with enhanced securit
 ```yaml
 uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
 with:
-  # binary_name is now optional - uses repository name by default
+  # binary-name is now optional - uses repository name by default
   exclude: 'linux-arm64,windows-x86_64,windows-arm64'
 ```
 
@@ -232,6 +220,76 @@ This workflow has been designed with security as a priority:
 - Path traversal protection
 
 For security issues, please see [SECURITY_IMPROVEMENTS.md](SECURITY_IMPROVEMENTS.md).
+
+## 📦 npm Publishing (Coming Soon)
+
+Extend your Rust releases to the npm ecosystem for easier installation and distribution.
+
+### Quick Start with npm
+
+```yaml
+jobs:
+  rust-release:
+    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
+    with:
+      binary-name: 'my-cli'
+      release-tag: ${{ github.ref_name }}
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  npm-publish:
+    needs: rust-release
+    uses: xctions/rust-release/.github/workflows/npm-publish.yml@v2
+    with:
+      source_tag: ${{ github.ref_name }}
+      package_name: 'my-cli'
+      npm_dist_tag: 'beta'  # Safe deployment strategy
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+### Benefits of npm Publishing
+
+- **Easy Installation**: `npm install -g my-cli`
+- **Node.js Ecosystem Integration**: Use in package.json scripts
+- **Automatic Updates**: `npm update -g my-cli`
+- **Cross-Platform**: Works on Windows, macOS, Linux
+
+### Safe Deployment Strategy
+
+```yaml
+# GitHub Release → npm Strategy
+v1.2.3 → 1.2.3-beta.0 (@beta)     # Safe testing
+# After validation:
+# npm dist-tag add my-cli@1.2.3-beta.0 latest
+```
+
+### npm Tag Options
+
+| npm Tag | Use Case | Risk Level |
+|---------|----------|------------|
+| `latest` | Production releases | ❌ High (default install) |
+| `beta` | Testing releases | ⚠️ Medium (visible tag) |
+| `alpha` | Early testing | ⚠️ Medium (visible tag) |
+| `rc` | Release candidates | ⚠️ Medium (visible tag) |
+| `dev` | Development builds | ✅ Low (experimental) |
+
+**Note**: All tags have identical unpublish restrictions (72-hour rule). Risk level refers to mistake impact.
+
+### Advanced Features
+
+- **Platform Detection**: Automatically downloads correct binary
+- **Custom npm Registry**: Support for private registries
+- **Scoped Packages**: `@myorg/my-cli` support
+- **Multiple Binaries**: Publish different tools from same release
+
+### Documentation
+
+- **[📖 Complete npm Guide](NPM_PUBLISHING.md)** - Comprehensive npm publishing strategy
+- **[📋 Usage Examples](examples/npm-publish-usage.yml)** - Real-world workflow examples
+- **[🛡️ Security Best Practices](NPM_PUBLISHING.md#-best-practices)** - Safe deployment patterns
+
+**Note**: npm publishing feature is planned for v3. See [NPM_PUBLISHING.md](NPM_PUBLISHING.md) for detailed strategy and implementation timeline.
 
 ## 📄 License
 

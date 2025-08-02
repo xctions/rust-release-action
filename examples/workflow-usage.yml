@@ -12,7 +12,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      # binary_name is optional - uses repository name by default
+      # binary-name is optional - uses repository name by default
       release-tag: ${{ github.ref_name }}
       rust-version: 'stable'
       cargo-args: '--release --locked'
