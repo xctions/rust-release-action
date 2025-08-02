@@ -34,7 +34,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      # binary_name is optional - uses repository name by default
+      # binary-name is optional - uses repository name by default
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -44,7 +44,7 @@ jobs:
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `binary_name` | Binary name | No | Repository name |
+| `binary-name` | Binary name | No | Repository name |
 | `release-tag` | Release tag to create | Yes | |
 | `include` | JSON array of custom platforms | No | Default matrix |
 | `exclude` | Comma-separated platforms to exclude | No | |
@@ -79,7 +79,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      # No binary_name specified - uses repository name automatically
+      # No binary-name specified - uses repository name automatically
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -91,7 +91,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binary_name: 'my-custom-app'
+      binary-name: 'my-custom-app'
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -134,7 +134,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binary_name: 'my-custom-app'  # Override repository name
+      binary-name: 'my-custom-app'  # Override repository name
       release-tag: ${{ github.ref_name }}
       rust-version: '1.75.0'
       cargo-args: '--release --locked --no-default-features --features production'
@@ -218,7 +218,7 @@ The new v2 reusable workflow replaces the composite action with enhanced securit
 ```yaml
 uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
 with:
-  # binary_name is now optional - uses repository name by default
+  # binary-name is now optional - uses repository name by default
   exclude: 'linux-arm64,windows-x86_64,windows-arm64'
 ```
 
@@ -244,7 +244,7 @@ jobs:
   rust-release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binary_name: 'my-cli'
+      binary-name: 'my-cli'
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

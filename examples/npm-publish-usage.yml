@@ -23,7 +23,7 @@ jobs:
   rust-release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binary_name: 'my-cli'  # or omit to use repository name
+      binary-name: 'my-cli'  # or omit to use repository name
       release-tag: ${{ github.event.inputs.tag || github.ref_name }}
       rust-version: 'stable'
       cargo-args: '--release --locked'
@@ -111,7 +111,7 @@ jobs:
   rust-release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binary_name: 'my-advanced-cli'
+      binary-name: 'my-advanced-cli'
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -159,7 +159,7 @@ jobs:
   rust-release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binary_name: 'production-cli'
+      binary-name: 'production-cli'
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -207,8 +207,8 @@ jobs:
   rust-release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      # Note: This will change when multi-binary support is added
-      binary_name: 'main-cli'  # Main binary
+      # Single binary build using simplified interface
+      binary-name: 'main-cli'  # Main binary
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -252,7 +252,7 @@ jobs:
   rust-release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binary_name: 'tested-cli'
+      binary-name: 'tested-cli'
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -323,7 +323,7 @@ jobs:
   rust-release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binary_name: 'enterprise-tool'
+      binary-name: 'enterprise-tool'
       release-tag: ${{ github.ref_name }}
       rust-version: '1.75.0'  # Pin specific Rust version
       cargo-args: '--release --locked --no-default-features --features enterprise'
@@ -365,7 +365,7 @@ jobs:
   rust-release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binary_name: 'dev-cli'
+      binary-name: 'dev-cli'
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

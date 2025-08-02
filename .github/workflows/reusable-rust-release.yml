@@ -3,8 +3,8 @@ name: Reusable Rust Release
 on:
   workflow_call:
     inputs:
-      binaries:
-        description: 'Comma-separated list of binary names to build (defaults to repository name)'
+      binary-name:
+        description: 'Binary name to build (defaults to repository name)'
         required: false
         type: string
         default: ''
@@ -54,7 +54,7 @@ jobs:
     name: Validate Inputs
     runs-on: ubuntu-latest
     outputs:
-      binary_name: ${{ steps.validate.outputs.binary_name }}
+      binary-name: ${{ steps.validate.outputs.binary-name }}
       build-matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - name: Checkout code
@@ -65,7 +65,7 @@ jobs:
         shell: bash
         run: |
           # Set default binary name from repository if not provided
-          BINARY_NAME="${{ inputs.binary_name }}"
+          BINARY_NAME="${{ inputs.binary-name }}"
           if [[ -z "$BINARY_NAME" ]]; then
             REPO_NAME="${{ github.event.repository.name }}"
             echo "No binary name specified, using repository name: $REPO_NAME"
@@ -111,7 +111,7 @@ jobs:
             echo "Warning: Rust version '$RUST_VERSION' may not be a standard version"
           fi
           
-          echo "binary_name=$BINARY_NAME" >> $GITHUB_OUTPUT
+          echo "binary-name=$BINARY_NAME" >> $GITHUB_OUTPUT
           echo "Validated binary name: $BINARY_NAME"
 
       - name: Validate release tag
@@ -230,7 +230,7 @@ jobs:
         shell: bash
         run: |
           # Get binary name from validation
-          BINARY_NAME="${{ needs.validate-inputs.outputs.binary_name }}"
+          BINARY_NAME="${{ needs.validate-inputs.outputs.binary-name }}"
           
           # Create release directory
           mkdir -p release
@@ -296,7 +296,7 @@ jobs:
         if: inputs.create-archives
         shell: bash
         run: |
-          BINARY_NAME="${{ needs.validate-inputs.outputs.binary_name }}"
+          BINARY_NAME="${{ needs.validate-inputs.outputs.binary-name }}"
           
           # Get variables to avoid GitHub Actions expressions in heredoc
           PLATFORM="${{ matrix.platform }}"
