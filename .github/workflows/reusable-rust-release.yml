@@ -298,16 +298,21 @@ jobs:
         run: |
           BINARY_NAME="${{ needs.validate-inputs.outputs.binary_name }}"
           
+          # Get variables to avoid GitHub Actions expressions in heredoc
+          PLATFORM="${{ matrix.platform }}"
+          TARGET="${{ matrix.target }}"
+          RELEASE_TAG="${{ inputs.release-tag }}"
+          
           # Determine binary extension and archive format
           BINARY_EXT=""
           ARCHIVE_EXT="tar.gz"
-          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+          if [[ "$TARGET" == *"windows"* ]]; then
             BINARY_EXT=".exe"
             ARCHIVE_EXT="zip"
           fi
           
-          BINARY_FILE="${BINARY_NAME}-${{ matrix.platform }}${BINARY_EXT}"
-          ARCHIVE_NAME="${BINARY_NAME}-${{ inputs.release-tag }}-${{ matrix.platform }}"
+          BINARY_FILE="${BINARY_NAME}-${PLATFORM}${BINARY_EXT}"
+          ARCHIVE_NAME="${BINARY_NAME}-${RELEASE_TAG}-${PLATFORM}"
             
           if [[ -f "release/$BINARY_FILE" ]]; then
             # Create temporary directory for archive contents
@@ -316,9 +321,9 @@ jobs:
             
             # Add README to archive
             cat > "temp-archive/$ARCHIVE_NAME/README.md" << EOF
-# $BINARY_NAME ${{ inputs.release-tag }}
+# ${BINARY_NAME} ${RELEASE_TAG}
 
-This archive contains the $BINARY_NAME binary for ${{ matrix.platform }}.
+This archive contains the ${BINARY_NAME} binary for ${PLATFORM}.
 
 ## Installation
 
@@ -326,14 +331,14 @@ Extract the binary and place it in your PATH.
 
 For Unix-like systems:
 \`\`\`bash
-chmod +x $BINARY_FILE
-sudo mv $BINARY_FILE /usr/local/bin/${BINARY_NAME}
+chmod +x ${BINARY_FILE}
+sudo mv ${BINARY_FILE} /usr/local/bin/${BINARY_NAME}
 \`\`\`
 
 ## Platform Information
-- Platform: ${{ matrix.platform }}
-- Target: ${{ matrix.target }}
-- Version: ${{ inputs.release-tag }}
+- Platform: ${PLATFORM}
+- Target: ${TARGET}
+- Version: ${RELEASE_TAG}
 
 Built with rust-release GitHub Action
 EOF
