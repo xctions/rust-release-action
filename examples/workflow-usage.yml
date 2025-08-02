@@ -1,0 +1,22 @@
+# Example workflow using the new secure reusable workflow
+# Place this file in .github/workflows/ in your Rust project
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
+    with:
+      binaries: 'my-app'
+      release-tag: ${{ github.ref_name }}
+      rust-version: 'stable'
+      cargo-args: '--release --locked'
+      generate-checksums: true
+      create-archives: true
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

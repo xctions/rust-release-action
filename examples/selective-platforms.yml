@@ -1,0 +1,19 @@
+# Example with selective platforms - only Linux and macOS
+name: Selective Platform Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: xctions/rust-release@v1
+        with:
+          binary-name: 'server-app'
+          release-tag: ${{ github.ref_name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          platforms: 'linux-x86_64,linux-arm64,mac-arm64'

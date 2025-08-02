@@ -1,0 +1,18 @@
+# Minimal example - builds for all platforms
+name: Simple Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: xctions/rust-release@v1
+        with:
+          binary-name: 'my-cli-tool'
+          release-tag: ${{ github.ref_name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

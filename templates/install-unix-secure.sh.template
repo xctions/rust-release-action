@@ -1,0 +1,415 @@
+#!/bin/bash
+
+# Secure installation script for {{BINARY_NAME}} {{VERSION}}
+# Platform: {{PLATFORM}}
+# This script downloads and installs {{BINARY_NAME}} from GitHub releases
+
+set -euo pipefail
+
+# Configuration (populated by template engine)
+readonly BINARY_NAME="{{BINARY_NAME}}"
+readonly VERSION="{{VERSION}}"
+readonly PLATFORM="{{PLATFORM}}"
+readonly REPO="{{REPO}}"
+readonly ARCHIVE_NAME="${BINARY_NAME}-${VERSION}-${PLATFORM}.tar.gz"
+readonly BINARY_FILE="${BINARY_NAME}"
+
+# Colors for output
+if [[ -t 1 ]]; then
+    readonly RED='\033[0;31m'
+    readonly GREEN='\033[0;32m'
+    readonly YELLOW='\033[1;33m'
+    readonly BLUE='\033[0;34m'
+    readonly NC='\033[0m' # No Color
+else
+    readonly RED=''
+    readonly GREEN=''
+    readonly YELLOW=''
+    readonly BLUE=''
+    readonly NC=''
+fi
+
+# Logging functions
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $*"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $*"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $*"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $*" >&2
+}
+
+# Error handling
+cleanup() {
+    local exit_code=$?
+    if [[ -n "${TEMP_DIR:-}" && -d "$TEMP_DIR" ]]; then
+        log_info "Cleaning up temporary directory: $TEMP_DIR"
+        rm -rf "$TEMP_DIR"
+    fi
+    if [[ $exit_code -ne 0 ]]; then
+        log_error "Installation failed with exit code $exit_code"
+    fi
+    exit $exit_code
+}
+
+trap cleanup EXIT INT TERM
+
+# Validation functions
+validate_platform() {
+    local current_os current_arch
+    
+    case "$(uname -s)" in
+        Linux*)
+            current_os="linux"
+            ;;
+        Darwin*)
+            current_os="mac"
+            ;;
+        *)
+            log_error "Unsupported operating system: $(uname -s)"
+            log_error "This script supports Linux and macOS only"
+            return 1
+            ;;
+    esac
+    
+    case "$(uname -m)" in
+        x86_64|amd64)
+            current_arch="x86_64"
+            ;;
+        aarch64|arm64)
+            current_arch="arm64"
+            ;;
+        *)
+            log_error "Unsupported architecture: $(uname -m)"
+            log_error "This script supports x86_64 and arm64 only"
+            return 1
+            ;;
+    esac
+    
+    local detected_platform="${current_os}-${current_arch}"
+    
+    if [[ "$PLATFORM" != "$detected_platform" ]]; then
+        log_warning "Platform mismatch detected!"
+        log_warning "Expected: $PLATFORM"
+        log_warning "Detected: $detected_platform"
+        
+        read -p "Continue anyway? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_error "Installation cancelled by user"
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
+check_dependencies() {
+    local missing_deps=()
+    
+    # Check for required commands
+    for cmd in curl tar; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing_deps+=("$cmd")
+        fi
+    done
+    
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log_error "Missing required dependencies: ${missing_deps[*]}"
+        log_error "Please install the missing dependencies and try again"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Download with verification
+download_release() {
+    local url="$1"
+    local output_file="$2"
+    local max_retries=3
+    local retry_delay=2
+    
+    log_info "Downloading from: $url"
+    
+    for ((i=1; i<=max_retries; i++)); do
+        if curl -fsSL --connect-timeout 10 --max-time 300 -o "$output_file" "$url"; then
+            log_success "Download completed"
+            return 0
+        else
+            local exit_code=$?
+            if [[ $i -lt $max_retries ]]; then
+                log_warning "Download failed (attempt $i/$max_retries), retrying in ${retry_delay}s..."
+                sleep $retry_delay
+                retry_delay=$((retry_delay * 2))
+            else
+                log_error "Download failed after $max_retries attempts"
+                return $exit_code
+            fi
+        fi
+    done
+}
+
+verify_checksum() {
+    local file="$1"
+    local checksums_url="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
+    local checksums_file="$TEMP_DIR/checksums.txt"
+    
+    log_info "Downloading checksums for verification..."
+    
+    if ! download_release "$checksums_url" "$checksums_file"; then
+        log_warning "Could not download checksums file - skipping verification"
+        log_warning "This reduces security but installation can continue"
+        read -p "Continue without checksum verification? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_error "Installation cancelled by user"
+            return 1
+        fi
+        return 0
+    fi
+    
+    log_info "Verifying checksum..."
+    
+    local filename
+    filename=$(basename "$file")
+    
+    # Find the checksum for our file
+    local expected_checksum
+    if expected_checksum=$(grep "  $filename$" "$checksums_file" | cut -d' ' -f1); then
+        if [[ -z "$expected_checksum" ]]; then
+            log_warning "No checksum found for $filename - skipping verification"
+            return 0
+        fi
+        
+        # Calculate actual checksum
+        local actual_checksum
+        if command -v sha256sum >/dev/null 2>&1; then
+            actual_checksum=$(sha256sum "$file" | cut -d' ' -f1)
+        elif command -v shasum >/dev/null 2>&1; then
+            actual_checksum=$(shasum -a 256 "$file" | cut -d' ' -f1)
+        else
+            log_warning "No SHA256 utility found - skipping checksum verification"
+            return 0
+        fi
+        
+        if [[ "$expected_checksum" == "$actual_checksum" ]]; then
+            log_success "Checksum verification passed"
+        else
+            log_error "Checksum verification failed!"
+            log_error "Expected: $expected_checksum"
+            log_error "Actual:   $actual_checksum"
+            log_error "This indicates the file may be corrupted or tampered with"
+            return 1
+        fi
+    else
+        log_warning "Could not find checksum for $filename in checksums file"
+    fi
+    
+    return 0
+}
+
+# Installation functions
+extract_archive() {
+    local archive_file="$1"
+    local extract_dir="$2"
+    
+    log_info "Extracting archive..."
+    
+    if ! tar -xzf "$archive_file" -C "$extract_dir"; then
+        log_error "Failed to extract archive"
+        return 1
+    fi
+    
+    log_success "Archive extracted successfully"
+    return 0
+}
+
+install_binary() {
+    local source_binary="$1"
+    local install_dir="${2:-/usr/local/bin}"
+    local target_binary="$install_dir/$BINARY_NAME"
+    
+    # Check if we can write to install directory
+    if [[ ! -w "$install_dir" ]]; then
+        if [[ $EUID -ne 0 ]]; then
+            log_info "Installation requires sudo privileges for $install_dir"
+            
+            # Use sudo for installation
+            if ! sudo cp "$source_binary" "$target_binary"; then
+                log_error "Failed to copy binary to $target_binary"
+                return 1
+            fi
+            
+            if ! sudo chmod +x "$target_binary"; then
+                log_error "Failed to make binary executable"
+                return 1
+            fi
+        else
+            log_error "Cannot write to installation directory: $install_dir"
+            return 1
+        fi
+    else
+        # Direct installation (user has write access)
+        if ! cp "$source_binary" "$target_binary"; then
+            log_error "Failed to copy binary to $target_binary"
+            return 1
+        fi
+        
+        if ! chmod +x "$target_binary"; then
+            log_error "Failed to make binary executable"
+            return 1
+        fi
+    fi
+    
+    log_success "Binary installed to: $target_binary"
+    return 0
+}
+
+# Main installation process
+main() {
+    log_info "Installing $BINARY_NAME $VERSION for $PLATFORM"
+    
+    # Validate environment
+    log_info "Validating platform compatibility..."
+    validate_platform || exit 1
+    
+    log_info "Checking dependencies..."
+    check_dependencies || exit 1
+    
+    # Create temporary directory
+    TEMP_DIR=$(mktemp -d)
+    log_info "Using temporary directory: $TEMP_DIR"
+    
+    # Download archive
+    local download_url="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE_NAME}"
+    local archive_path="$TEMP_DIR/$ARCHIVE_NAME"
+    
+    download_release "$download_url" "$archive_path" || exit 1
+    
+    # Verify checksum
+    verify_checksum "$archive_path" || exit 1
+    
+    # Extract archive
+    local extract_dir="$TEMP_DIR/extract"
+    mkdir -p "$extract_dir"
+    extract_archive "$archive_path" "$extract_dir" || exit 1
+    
+    # Find the binary in extracted files
+    local binary_path
+    if [[ -f "$extract_dir/${BINARY_NAME}-${VERSION}-${PLATFORM}/$BINARY_FILE" ]]; then
+        binary_path="$extract_dir/${BINARY_NAME}-${VERSION}-${PLATFORM}/$BINARY_FILE"
+    elif [[ -f "$extract_dir/$BINARY_FILE" ]]; then
+        binary_path="$extract_dir/$BINARY_FILE"
+    else
+        log_error "Binary not found in extracted archive"
+        log_error "Expected: $BINARY_FILE"
+        log_error "Available files:"
+        find "$extract_dir" -type f -name "*" | head -10
+        exit 1
+    fi
+    
+    # Verify binary is executable
+    if [[ ! -x "$binary_path" ]]; then
+        log_info "Making binary executable..."
+        chmod +x "$binary_path"
+    fi
+    
+    # Test binary
+    log_info "Testing binary..."
+    if "$binary_path" --version >/dev/null 2>&1 || "$binary_path" --help >/dev/null 2>&1; then
+        log_success "Binary test passed"
+    else
+        log_warning "Binary test failed - binary may not work correctly"
+    fi
+    
+    # Install binary
+    log_info "Installing binary..."
+    
+    # Determine install directory
+    local install_dir="/usr/local/bin"
+    
+    # Check if user wants custom install location
+    if [[ -n "${INSTALL_DIR:-}" ]]; then
+        install_dir="$INSTALL_DIR"
+        log_info "Using custom install directory: $install_dir"
+        mkdir -p "$install_dir"
+    elif [[ ! -w "/usr/local/bin" && $EUID -ne 0 ]]; then
+        # Suggest user-local installation if no sudo
+        local user_bin="$HOME/.local/bin"
+        log_info "Cannot write to /usr/local/bin without sudo"
+        log_info "Using user-local installation: $user_bin"
+        install_dir="$user_bin"
+        mkdir -p "$install_dir"
+        
+        # Add to PATH if not already there
+        if [[ ":$PATH:" != *":$user_bin:"* ]]; then
+            log_info "Adding $user_bin to PATH"
+            echo "export PATH=\"$user_bin:\$PATH\"" >> "$HOME/.bashrc"
+            log_info "Please run: source ~/.bashrc"
+            log_info "Or restart your terminal to use $BINARY_NAME"
+        fi
+    fi
+    
+    install_binary "$binary_path" "$install_dir" || exit 1
+    
+    # Verify installation
+    log_info "Verifying installation..."
+    local installed_binary="$install_dir/$BINARY_NAME"
+    
+    if [[ -x "$installed_binary" ]]; then
+        log_success "Installation completed successfully!"
+        log_info "Binary location: $installed_binary"
+        
+        # Show version if possible
+        if version_output=$("$installed_binary" --version 2>/dev/null); then
+            log_info "Installed version: $version_output"
+        fi
+        
+        log_info "You can now use '$BINARY_NAME' from your terminal"
+    else
+        log_error "Installation verification failed"
+        exit 1
+    fi
+}
+
+# Handle command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --install-dir=*)
+            INSTALL_DIR="${1#*=}"
+            shift
+            ;;
+        --help|-h)
+            echo "Secure installer for $BINARY_NAME $VERSION"
+            echo ""
+            echo "Usage: $0 [options]"
+            echo ""
+            echo "Options:"
+            echo "  --install-dir=DIR  Custom installation directory"
+            echo "  --help, -h         Show this help message"
+            echo ""
+            echo "Environment variables:"
+            echo "  INSTALL_DIR        Custom installation directory"
+            echo ""
+            echo "Default installation directory: /usr/local/bin"
+            echo "Fallback directory (no sudo): ~/.local/bin"
+            exit 0
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            log_error "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+# Run main installation
+main "$@"

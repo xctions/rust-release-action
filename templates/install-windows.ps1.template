@@ -1,0 +1,120 @@
+# Installation script for {{BINARY_NAME}} ({{PLATFORM}})
+# Version: {{VERSION}}
+
+param(
+    [switch]$Force,
+    [string]$InstallDir = ""
+)
+
+$ErrorActionPreference = "Stop"
+
+$BINARY_NAME = "{{BINARY_NAME}}"
+$PLATFORM = "{{PLATFORM}}"
+$VERSION = "{{VERSION}}"
+$REPO = "{{REPO}}"
+$BINARY_EXT = "{{BINARY_EXT}}"
+
+function Write-Log {
+    param([string]$Message)
+    Write-Host "[INFO] $Message" -ForegroundColor Green
+}
+
+function Write-Warn {
+    param([string]$Message)
+    Write-Host "[WARN] $Message" -ForegroundColor Yellow
+}
+
+function Write-Error {
+    param([string]$Message)
+    Write-Host "[ERROR] $Message" -ForegroundColor Red
+    exit 1
+}
+
+function Test-Platform {
+    $os = "windows"
+    $arch = if ([Environment]::Is64BitOperatingSystem) {
+        switch ($env:PROCESSOR_ARCHITECTURE) {
+            "AMD64" { "x86_64" }
+            "ARM64" { "arm64" }
+            default { "x86_64" }
+        }
+    } else {
+        Write-Error "32-bit Windows is not supported"
+    }
+    
+    return "$os-$arch"
+}
+
+function Install-Binary {
+    Write-Log "Installing $BINARY_NAME $VERSION for $PLATFORM"
+    
+    # Verify platform compatibility
+    $detectedPlatform = Test-Platform
+    
+    if ($detectedPlatform -ne $PLATFORM -and -not $Force) {
+        Write-Warn "Platform mismatch: detected $detectedPlatform, installing for $PLATFORM"
+        $response = Read-Host "Continue? (y/N)"
+        if ($response -notmatch "^[Yy]$") {
+            Write-Error "Installation cancelled"
+        }
+    }
+    
+    # Download URL
+    $downloadUrl = "https://github.com/$REPO/releases/download/$VERSION/$BINARY_NAME-$PLATFORM$BINARY_EXT"
+    
+    # Determine installation directory
+    if ($InstallDir -eq "") {
+        $InstallDir = if (Test-Path "$env:LOCALAPPDATA\Programs") {
+            "$env:LOCALAPPDATA\Programs\$BINARY_NAME"
+        } else {
+            "$env:USERPROFILE\bin"
+        }
+    }
+    
+    # Create installation directory
+    if (-not (Test-Path $InstallDir)) {
+        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    }
+    
+    $binaryPath = Join-Path $InstallDir "$BINARY_NAME$BINARY_EXT"
+    
+    Write-Log "Downloading $BINARY_NAME from $downloadUrl"
+    
+    try {
+        # Download with progress
+        $webClient = New-Object System.Net.WebClient
+        $webClient.DownloadFile($downloadUrl, $binaryPath)
+        $webClient.Dispose()
+    }
+    catch {
+        Write-Error "Failed to download $BINARY_NAME: $_"
+    }
+    
+    Write-Log "Successfully installed $BINARY_NAME to $binaryPath"
+    
+    # Check if install directory is in PATH
+    $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($currentPath -notlike "*$InstallDir*") {
+        Write-Warn "$InstallDir is not in your PATH"
+        $addToPath = Read-Host "Add $InstallDir to your PATH? (y/N)"
+        if ($addToPath -match "^[Yy]$") {
+            $newPath = "$currentPath;$InstallDir"
+            [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
+            Write-Log "Added $InstallDir to your PATH"
+            Write-Log "Please restart your terminal or run: `$env:PATH += ';$InstallDir'"
+        }
+    }
+    
+    # Verify installation
+    try {
+        $versionOutput = & $binaryPath --version 2>&1
+        Write-Log "Installation verified successfully"
+        Write-Host $versionOutput
+    }
+    catch {
+        Write-Warn "Installation completed but binary verification failed"
+    }
+}
+
+# Run installation
+Install-Binary

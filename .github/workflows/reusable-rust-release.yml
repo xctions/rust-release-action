@@ -1,0 +1,464 @@
+name: Reusable Rust Release
+
+on:
+  workflow_call:
+    inputs:
+      binaries:
+        description: 'Comma-separated list of binary names to build'
+        required: true
+        type: string
+      include:
+        description: 'JSON array of platforms to include (optional - overrides defaults)'
+        required: false
+        type: string
+        default: ''
+      exclude:
+        description: 'Comma-separated platforms to exclude'
+        required: false
+        type: string
+        default: ''
+      rust-version:
+        description: 'Rust version to use'
+        required: false
+        type: string
+        default: 'stable'
+      cargo-args:
+        description: 'Additional cargo build arguments'
+        required: false
+        type: string
+        default: '--release'
+      release-tag:
+        description: 'Release tag to create'
+        required: true
+        type: string
+      generate-checksums:
+        description: 'Generate SHA256 checksums file'
+        required: false
+        type: boolean
+        default: true
+      create-archives:
+        description: 'Create tar.gz/zip archives for each binary'
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      GITHUB_TOKEN:
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate-inputs:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    outputs:
+      validated-binaries: ${{ steps.validate.outputs.binaries }}
+      build-matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        id: validate
+        shell: bash
+        run: |
+          # Validate binaries input
+          BINARIES="${{ inputs.binaries }}"
+          if [[ -z "$BINARIES" ]]; then
+            echo "Error: binaries input is required"
+            exit 1
+          fi
+          
+          # Validate binary names (alphanumeric, dash, underscore only)
+          IFS=',' read -ra BINARY_ARRAY <<< "$BINARIES"
+          VALIDATED_BINARIES=""
+          for binary in "${BINARY_ARRAY[@]}"; do
+            binary=$(echo "$binary" | xargs) # trim whitespace
+            if [[ ! "$binary" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+              echo "Error: Invalid binary name: $binary"
+              echo "Binary names must contain only alphanumeric characters, dashes and underscores"
+              exit 1
+            fi
+            if [[ -n "$VALIDATED_BINARIES" ]]; then
+              VALIDATED_BINARIES="$VALIDATED_BINARIES,$binary"
+            else
+              VALIDATED_BINARIES="$binary"
+            fi
+          done
+          
+          # Validate cargo args (enhanced security)
+          CARGO_ARGS="${{ inputs.cargo-args }}"
+          if [[ "$CARGO_ARGS" =~ [\;\|\&\$\`\"\'] ]]; then
+            echo "Error: Invalid characters in cargo-args"
+            echo "Cargo args cannot contain: ; | & $ \` \" '"
+            exit 1
+          fi
+          
+          # Additional validation: ensure cargo args start with valid flags
+          if [[ -n "$CARGO_ARGS" && ! "$CARGO_ARGS" =~ ^[[:space:]]*-- ]]; then
+            echo "Error: cargo-args must start with '--' flags"
+            exit 1
+          fi
+          
+          # Validate rust version (enhanced)
+          RUST_VERSION="${{ inputs.rust-version }}"
+          if [[ ! "$RUST_VERSION" =~ ^[a-zA-Z0-9.-]+$ ]] || [[ ${#RUST_VERSION} -gt 20 ]]; then
+            echo "Error: Invalid rust version format or too long: $RUST_VERSION"
+            exit 1
+          fi
+          
+          # Validate against known rust version patterns
+          if [[ ! "$RUST_VERSION" =~ ^(stable|beta|nightly|[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "Warning: Rust version '$RUST_VERSION' may not be a standard version"
+          fi
+          
+          echo "binaries=$VALIDATED_BINARIES" >> $GITHUB_OUTPUT
+          echo "Validated binaries: $VALIDATED_BINARIES"
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          RELEASE_TAG="${{ inputs.release-tag }}"
+          if [[ ! "$RELEASE_TAG" =~ ^[a-zA-Z0-9v._-]+$ ]] || [[ ${#RELEASE_TAG} -gt 50 ]]; then
+            echo "Error: Invalid release tag format or too long: $RELEASE_TAG"
+            exit 1
+          fi
+
+      - name: Generate build matrix
+        id: matrix
+        shell: bash
+        run: |
+          # Default platform matrix
+          DEFAULT_MATRIX='[
+            {"target": "x86_64-unknown-linux-gnu", "os": "ubuntu-latest", "platform": "linux-x86_64"},
+            {"target": "aarch64-unknown-linux-gnu", "os": "ubuntu-latest", "platform": "linux-arm64"},
+            {"target": "x86_64-apple-darwin", "os": "macos-12", "platform": "mac-x86_64"},
+            {"target": "aarch64-apple-darwin", "os": "macos-latest", "platform": "mac-arm64"},
+            {"target": "x86_64-pc-windows-msvc", "os": "windows-latest", "platform": "windows-x86_64"},
+            {"target": "aarch64-pc-windows-msvc", "os": "windows-latest", "platform": "windows-arm64"}
+          ]'
+          
+          MATRIX="$DEFAULT_MATRIX"
+          
+          # Override with custom include if provided
+          INCLUDE_INPUT="${{ inputs.include }}"
+          if [[ -n "$INCLUDE_INPUT" && "$INCLUDE_INPUT" != "" ]]; then
+            # Validate JSON format
+            if ! echo "$INCLUDE_INPUT" | jq . > /dev/null 2>&1; then
+              echo "Error: Invalid JSON format in include parameter"
+              exit 1
+            fi
+            MATRIX="$INCLUDE_INPUT"
+          fi
+          
+          # Apply exclude filter if provided
+          EXCLUDE_INPUT="${{ inputs.exclude }}"
+          if [[ -n "$EXCLUDE_INPUT" && "$EXCLUDE_INPUT" != "" ]]; then
+            IFS=',' read -ra EXCLUDE_ARRAY <<< "$EXCLUDE_INPUT"
+            for exclude_platform in "${EXCLUDE_ARRAY[@]}"; do
+              exclude_platform=$(echo "$exclude_platform" | xargs) # trim whitespace
+              # Validate exclude platform name (enhanced)
+              if [[ ! "$exclude_platform" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ ${#exclude_platform} -gt 30 ]]; then
+                echo "Error: Invalid exclude platform name or too long: $exclude_platform"
+                exit 1
+              fi
+              
+              # Check if platform exists in matrix before excluding
+              if ! echo "$MATRIX" | jq -e --arg platform "$exclude_platform" '.[] | select(.platform == $platform)' > /dev/null; then
+                echo "Warning: Platform '$exclude_platform' not found in matrix, skipping exclude"
+                continue
+              fi
+              MATRIX=$(echo "$MATRIX" | jq --arg platform "$exclude_platform" 'map(select(.platform != $platform))')
+            done
+          fi
+          
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "Generated matrix:"
+          echo "$MATRIX" | jq .
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: validate-inputs
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.validate-inputs.outputs.build-matrix) }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ inputs.rust-version }}
+          targets: ${{ matrix.target }}
+
+      - name: Setup cross-compilation (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ matrix.target }}-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-target-
+
+      - name: Build binaries
+        shell: bash
+        run: |
+          # Build each binary specified in the input
+          IFS=',' read -ra BINARY_ARRAY <<< "${{ needs.validate-inputs.outputs.validated-binaries }}"
+          
+          # Create release directory
+          mkdir -p release
+          
+          for binary in "${BINARY_ARRAY[@]}"; do
+            binary=$(echo "$binary" | xargs) # trim whitespace
+            echo "Building binary: $binary for target: ${{ matrix.target }}"
+            
+            # Validate binary name before build (additional security)
+            if [[ ! "$binary" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ ${#binary} -gt 50 ]]; then
+              echo "Error: Invalid binary name or too long: $binary"
+              exit 1
+            fi
+            
+            # Build the specific binary with enhanced error handling
+            echo "Building binary: $binary for target: ${{ matrix.target }}"
+            
+            # Check if binary exists in Cargo.toml
+            if ! cargo metadata --format-version 1 | jq -e --arg bin "$binary" '.packages[].targets[] | select(.name == $bin and (.kind[] | contains("bin")))' > /dev/null; then
+              echo "Error: Binary '$binary' not found in Cargo.toml"
+              echo "Available binaries:"
+              cargo metadata --format-version 1 | jq -r '.packages[].targets[] | select(.kind[] | contains("bin")) | .name' || echo "Could not list binaries"
+              exit 1
+            fi
+            
+            if ! cargo build --bin "$binary" --target ${{ matrix.target }} ${{ inputs.cargo-args }}; then
+              echo "Error: Failed to build binary '$binary' for target '${{ matrix.target }}'"
+              echo "Cargo args: ${{ inputs.cargo-args }}"
+              exit 1
+            fi
+            
+            echo "Successfully built binary: $binary"
+            
+            # Determine binary extension
+            BINARY_EXT=""
+            if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+              BINARY_EXT=".exe"
+            fi
+            
+            SOURCE_BINARY="target/${{ matrix.target }}/release/${binary}${BINARY_EXT}"
+            TARGET_BINARY="release/${binary}-${{ matrix.platform }}${BINARY_EXT}"
+            
+            # Copy binary to release directory with better error handling
+            if [[ ! -f "$SOURCE_BINARY" ]]; then
+              echo "Error: Binary not found: $SOURCE_BINARY"
+              echo "Expected binary location: $SOURCE_BINARY"
+              echo "Available files in target directory:"
+              find "target/${{ matrix.target }}/release" -type f -executable 2>/dev/null || echo "Target directory not found or no executable files"
+              exit 1
+            fi
+            
+            if ! cp "$SOURCE_BINARY" "$TARGET_BINARY"; then
+              echo "Error: Failed to copy binary from $SOURCE_BINARY to $TARGET_BINARY"
+              exit 1
+            fi
+            
+            # Set executable permissions for non-Windows
+            if [[ "${{ matrix.target }}" != *"windows"* ]]; then
+              if ! chmod +x "$TARGET_BINARY"; then
+                echo "Error: Failed to set executable permissions on $TARGET_BINARY"
+                exit 1
+              fi
+            fi
+            
+            # Verify the binary was created successfully
+            if [[ ! -f "$TARGET_BINARY" ]]; then
+              echo "Error: Target binary was not created: $TARGET_BINARY"
+              exit 1
+            fi
+            
+            echo "Successfully built and copied: $TARGET_BINARY"
+          done
+
+      - name: Create archives
+        if: inputs.create-archives
+        shell: bash
+        run: |
+          IFS=',' read -ra BINARY_ARRAY <<< "${{ needs.validate-inputs.outputs.validated-binaries }}"
+          
+          for binary in "${BINARY_ARRAY[@]}"; do
+            binary=$(echo "$binary" | xargs)
+            
+            # Determine binary extension and archive format
+            BINARY_EXT=""
+            ARCHIVE_EXT="tar.gz"
+            if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+              BINARY_EXT=".exe"
+              ARCHIVE_EXT="zip"
+            fi
+            
+            BINARY_FILE="${binary}-${{ matrix.platform }}${BINARY_EXT}"
+            ARCHIVE_NAME="${binary}-${{ inputs.release-tag }}-${{ matrix.platform }}"
+            
+            if [[ -f "release/$BINARY_FILE" ]]; then
+              # Create temporary directory for archive contents
+              mkdir -p "temp-archive/$ARCHIVE_NAME"
+              cp "release/$BINARY_FILE" "temp-archive/$ARCHIVE_NAME/"
+              
+              # Add README to archive
+              cat > "temp-archive/$ARCHIVE_NAME/README.md" << EOF
+# $binary ${{ inputs.release-tag }}
+
+This archive contains the $binary binary for ${{ matrix.platform }}.
+
+## Installation
+
+Extract the binary and place it in your PATH.
+
+For Unix-like systems:
+\`\`\`bash
+chmod +x $BINARY_FILE
+sudo mv $BINARY_FILE /usr/local/bin/${binary}
+\`\`\`
+
+## Platform Information
+- Platform: ${{ matrix.platform }}
+- Target: ${{ matrix.target }}
+- Version: ${{ inputs.release-tag }}
+
+Built with rust-release GitHub Action
+EOF
+              
+              # Create archive
+              cd temp-archive
+              if [[ "$ARCHIVE_EXT" == "zip" ]]; then
+                zip -r "../release/${ARCHIVE_NAME}.zip" "$ARCHIVE_NAME"
+              else
+                tar -czf "../release/${ARCHIVE_NAME}.tar.gz" "$ARCHIVE_NAME"
+              fi
+              cd ..
+              
+              # Clean up
+              rm -rf temp-archive
+              
+              echo "Created archive: release/${ARCHIVE_NAME}.${ARCHIVE_EXT}"
+            fi
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.platform }}
+          path: release/
+          retention-days: 1
+
+  create-release:
+    name: Create Release
+    needs: [validate-inputs, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          
+          # Collect all binaries and archives with error handling
+          if ! find artifacts -type f -exec cp {} release-assets/ \;; then
+            echo "Error: Failed to copy artifacts to release-assets"
+            exit 1
+          fi
+          
+          # Verify we have assets to release
+          ASSET_COUNT=$(find release-assets -type f | wc -l)
+          if [[ "$ASSET_COUNT" -eq 0 ]]; then
+            echo "Error: No release assets found"
+            echo "Artifacts directory contents:"
+            find artifacts -type f || echo "No artifacts found"
+            exit 1
+          fi
+          
+          echo "Found $ASSET_COUNT release assets:"
+          ls -la release-assets/
+
+      - name: Generate checksums
+        if: inputs.generate-checksums
+        shell: bash
+        run: |
+          cd release-assets
+          
+          # Verify we have files to checksum
+          if [[ ! -f * ]]; then
+            echo "Error: No files found to generate checksums for"
+            exit 1
+          fi
+          
+          # Generate SHA256 checksums with error handling
+          if command -v sha256sum >/dev/null; then
+            if ! sha256sum * > checksums.txt; then
+              echo "Error: Failed to generate checksums with sha256sum"
+              exit 1
+            fi
+          elif command -v shasum >/dev/null; then
+            if ! shasum -a 256 * > checksums.txt; then
+              echo "Error: Failed to generate checksums with shasum"
+              exit 1
+            fi
+          else
+            echo "Error: No SHA256 utility available (sha256sum or shasum)"
+            exit 1
+          fi
+          
+          # Verify checksums file was created
+          if [[ ! -f checksums.txt || ! -s checksums.txt ]]; then
+            echo "Error: Checksums file was not created or is empty"
+            exit 1
+          fi
+          
+          echo "Generated checksums:"
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ inputs.release-tag }}
+          name: Release ${{ inputs.release-tag }}
+          files: release-assets/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

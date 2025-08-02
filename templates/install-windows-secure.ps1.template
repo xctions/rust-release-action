@@ -1,0 +1,455 @@
+# Secure installation script for {{BINARY_NAME}} {{VERSION}}
+# Platform: {{PLATFORM}}
+# This script downloads and installs {{BINARY_NAME}} from GitHub releases
+
+[CmdletBinding()]
+param(
+    [string]$InstallDir = "",
+    [switch]$Help,
+    [switch]$Force
+)
+
+# Configuration (populated by template engine)
+$BINARY_NAME = "{{BINARY_NAME}}"
+$VERSION = "{{VERSION}}"
+$PLATFORM = "{{PLATFORM}}"
+$REPO = "{{REPO}}"
+$ARCHIVE_NAME = "${BINARY_NAME}-${VERSION}-${PLATFORM}.zip"
+$BINARY_FILE = "${BINARY_NAME}.exe"
+
+# Error handling
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+# Logging functions
+function Write-InfoLog {
+    param([string]$Message)
+    Write-Host "[INFO] $Message" -ForegroundColor Blue
+}
+
+function Write-SuccessLog {
+    param([string]$Message)
+    Write-Host "[SUCCESS] $Message" -ForegroundColor Green
+}
+
+function Write-WarningLog {
+    param([string]$Message)
+    Write-Host "[WARNING] $Message" -ForegroundColor Yellow
+}
+
+function Write-ErrorLog {
+    param([string]$Message)
+    Write-Host "[ERROR] $Message" -ForegroundColor Red
+}
+
+# Cleanup function
+function Cleanup {
+    param([string]$TempDir)
+    
+    if ($TempDir -and (Test-Path $TempDir)) {
+        Write-InfoLog "Cleaning up temporary directory: $TempDir"
+        try {
+            Remove-Item -Path $TempDir -Recurse -Force
+        } catch {
+            Write-WarningLog "Failed to clean up temporary directory: $_"
+        }
+    }
+}
+
+# Show help
+function Show-Help {
+    Write-Host "Secure installer for $BINARY_NAME $VERSION"
+    Write-Host ""
+    Write-Host "Usage: .\install-$PLATFORM.ps1 [options]"
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "  -InstallDir <dir>  Custom installation directory"
+    Write-Host "  -Force             Force installation even if binary exists"
+    Write-Host "  -Help              Show this help message"
+    Write-Host ""
+    Write-Host "Default installation directory: %USERPROFILE%\.local\bin"
+    Write-Host "System installation directory: C:\Program Files\$BINARY_NAME"
+    Write-Host ""
+    Write-Host "Examples:"
+    Write-Host "  .\install-$PLATFORM.ps1"
+    Write-Host "  .\install-$PLATFORM.ps1 -InstallDir C:\Tools"
+    Write-Host "  .\install-$PLATFORM.ps1 -Force"
+}
+
+# Validation functions
+function Test-Platform {
+    $currentOS = [System.Environment]::OSVersion.Platform
+    $currentArch = [System.Environment]::Is64BitOperatingSystem
+    
+    if ($currentOS -ne [System.PlatformID]::Win32NT) {
+        Write-ErrorLog "This script is for Windows only"
+        return $false
+    }
+    
+    $detectedPlatform = if ($currentArch) { "windows-x86_64" } else { "windows-x86" }
+    
+    if ($PLATFORM -ne $detectedPlatform -and $PLATFORM -ne "windows-arm64") {
+        Write-WarningLog "Platform mismatch detected!"
+        Write-WarningLog "Expected: $PLATFORM"
+        Write-WarningLog "Detected: $detectedPlatform"
+        
+        if (-not $Force) {
+            $response = Read-Host "Continue anyway? [y/N]"
+            if ($response -notmatch "^[Yy]$") {
+                Write-ErrorLog "Installation cancelled by user"
+                return $false
+            }
+        }
+    }
+    
+    return $true
+}
+
+function Test-Dependencies {
+    # Check PowerShell version
+    if ($PSVersionTable.PSVersion.Major -lt 3) {
+        Write-ErrorLog "PowerShell 3.0 or higher is required"
+        return $false
+    }
+    
+    # Check if we can download files
+    try {
+        $null = Invoke-WebRequest -Uri "https://www.google.com" -Method Head -TimeoutSec 5 -UseBasicParsing
+    } catch {
+        Write-ErrorLog "Cannot access the internet. Please check your connection."
+        return $false
+    }
+    
+    return $true
+}
+
+# Download with verification
+function Get-ReleaseFile {
+    param(
+        [string]$Url,
+        [string]$OutputPath,
+        [int]$MaxRetries = 3
+    )
+    
+    Write-InfoLog "Downloading from: $Url"
+    
+    for ($i = 1; $i -le $MaxRetries; $i++) {
+        try {
+            $progressPreference = 'SilentlyContinue'
+            Invoke-WebRequest -Uri $Url -OutFile $OutputPath -TimeoutSec 300 -UseBasicParsing
+            Write-SuccessLog "Download completed"
+            return $true
+        } catch {
+            if ($i -lt $MaxRetries) {
+                $retryDelay = [Math]::Pow(2, $i)
+                Write-WarningLog "Download failed (attempt $i/$MaxRetries), retrying in ${retryDelay}s..."
+                Start-Sleep -Seconds $retryDelay
+            } else {
+                Write-ErrorLog "Download failed after $MaxRetries attempts: $_"
+                return $false
+            }
+        }
+    }
+    
+    return $false
+}
+
+function Test-Checksum {
+    param(
+        [string]$FilePath,
+        [string]$ChecksumsUrl
+    )
+    
+    Write-InfoLog "Downloading checksums for verification..."
+    
+    $tempChecksums = Join-Path $env:TEMP "checksums.txt"
+    
+    try {
+        if (-not (Get-ReleaseFile -Url $ChecksumsUrl -OutputPath $tempChecksums)) {
+            Write-WarningLog "Could not download checksums file - skipping verification"
+            Write-WarningLog "This reduces security but installation can continue"
+            
+            if (-not $Force) {
+                $response = Read-Host "Continue without checksum verification? [y/N]"
+                if ($response -notmatch "^[Yy]$") {
+                    Write-ErrorLog "Installation cancelled by user"
+                    return $false
+                }
+            }
+            return $true
+        }
+        
+        Write-InfoLog "Verifying checksum..."
+        
+        $filename = Split-Path $FilePath -Leaf
+        $checksumsContent = Get-Content $tempChecksums
+        $checksumLine = $checksumsContent | Where-Object { $_ -match "  $filename$" }
+        
+        if (-not $checksumLine) {
+            Write-WarningLog "No checksum found for $filename - skipping verification"
+            return $true
+        }
+        
+        $expectedChecksum = ($checksumLine -split "  ")[0]
+        
+        # Calculate actual checksum
+        $actualChecksum = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash.ToLower()
+        
+        if ($expectedChecksum -eq $actualChecksum) {
+            Write-SuccessLog "Checksum verification passed"
+        } else {
+            Write-ErrorLog "Checksum verification failed!"
+            Write-ErrorLog "Expected: $expectedChecksum"
+            Write-ErrorLog "Actual:   $actualChecksum"
+            Write-ErrorLog "This indicates the file may be corrupted or tampered with"
+            return $false
+        }
+    } catch {
+        Write-WarningLog "Checksum verification failed with error: $_"
+        Write-WarningLog "Continuing without verification"
+    } finally {
+        if (Test-Path $tempChecksums) {
+            Remove-Item $tempChecksums -Force
+        }
+    }
+    
+    return $true
+}
+
+# Installation functions
+function Expand-Archive {
+    param(
+        [string]$ArchivePath,
+        [string]$DestinationPath
+    )
+    
+    Write-InfoLog "Extracting archive..."
+    
+    try {
+        if ($PSVersionTable.PSVersion.Major -ge 5) {
+            Expand-Archive -Path $ArchivePath -DestinationPath $DestinationPath -Force
+        } else {
+            # Fallback for older PowerShell versions
+            $shell = New-Object -ComObject Shell.Application
+            $zip = $shell.Namespace($ArchivePath)
+            $dest = $shell.Namespace($DestinationPath)
+            $dest.CopyHere($zip.Items(), 4)
+        }
+        
+        Write-SuccessLog "Archive extracted successfully"
+        return $true
+    } catch {
+        Write-ErrorLog "Failed to extract archive: $_"
+        return $false
+    }
+}
+
+function Install-Binary {
+    param(
+        [string]$SourcePath,
+        [string]$InstallDir
+    )
+    
+    $targetPath = Join-Path $InstallDir $BINARY_FILE
+    
+    # Create install directory if it doesn't exist
+    if (-not (Test-Path $InstallDir)) {
+        try {
+            New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+            Write-InfoLog "Created installation directory: $InstallDir"
+        } catch {
+            Write-ErrorLog "Failed to create installation directory: $_"
+            return $false
+        }
+    }
+    
+    # Check if binary already exists
+    if ((Test-Path $targetPath) -and (-not $Force)) {
+        Write-WarningLog "Binary already exists at: $targetPath"
+        $response = Read-Host "Overwrite existing binary? [y/N]"
+        if ($response -notmatch "^[Yy]$") {
+            Write-ErrorLog "Installation cancelled by user"
+            return $false
+        }
+    }
+    
+    # Copy binary
+    try {
+        Copy-Item -Path $SourcePath -Destination $targetPath -Force
+        Write-SuccessLog "Binary installed to: $targetPath"
+    } catch {
+        Write-ErrorLog "Failed to copy binary: $_"
+        return $false
+    }
+    
+    return $true
+}
+
+function Add-ToPath {
+    param([string]$Directory)
+    
+    $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    
+    if ($currentPath -split ";" -notcontains $Directory) {
+        Write-InfoLog "Adding $Directory to user PATH"
+        
+        try {
+            $newPath = if ($currentPath) { "$currentPath;$Directory" } else { $Directory }
+            [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
+            
+            # Update current session PATH
+            $env:PATH = "$env:PATH;$Directory"
+            
+            Write-SuccessLog "Added to PATH. You may need to restart your terminal."
+        } catch {
+            Write-WarningLog "Failed to add to PATH: $_"
+            Write-InfoLog "Please manually add '$Directory' to your PATH environment variable"
+        }
+    }
+}
+
+# Main installation process
+function Install-Application {
+    Write-InfoLog "Installing $BINARY_NAME $VERSION for $PLATFORM"
+    
+    # Handle help
+    if ($Help) {
+        Show-Help
+        return
+    }
+    
+    # Validate environment
+    Write-InfoLog "Validating platform compatibility..."
+    if (-not (Test-Platform)) {
+        exit 1
+    }
+    
+    Write-InfoLog "Checking dependencies..."
+    if (-not (Test-Dependencies)) {
+        exit 1
+    }
+    
+    # Create temporary directory
+    $tempDir = Join-Path $env:TEMP "rust-release-$(Get-Random)"
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    Write-InfoLog "Using temporary directory: $tempDir"
+    
+    try {
+        # Download archive
+        $downloadUrl = "https://github.com/$REPO/releases/download/$VERSION/$ARCHIVE_NAME"
+        $archivePath = Join-Path $tempDir $ARCHIVE_NAME
+        
+        if (-not (Get-ReleaseFile -Url $downloadUrl -OutputPath $archivePath)) {
+            exit 1
+        }
+        
+        # Verify checksum
+        $checksumsUrl = "https://github.com/$REPO/releases/download/$VERSION/checksums.txt"
+        if (-not (Test-Checksum -FilePath $archivePath -ChecksumsUrl $checksumsUrl)) {
+            exit 1
+        }
+        
+        # Extract archive
+        $extractDir = Join-Path $tempDir "extract"
+        if (-not (Expand-Archive -ArchivePath $archivePath -DestinationPath $extractDir)) {
+            exit 1
+        }
+        
+        # Find the binary in extracted files
+        $binaryPath = $null
+        $possiblePaths = @(
+            (Join-Path $extractDir "${BINARY_NAME}-${VERSION}-${PLATFORM}\$BINARY_FILE"),
+            (Join-Path $extractDir $BINARY_FILE)
+        )
+        
+        foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+                $binaryPath = $path
+                break
+            }
+        }
+        
+        if (-not $binaryPath) {
+            Write-ErrorLog "Binary not found in extracted archive"
+            Write-ErrorLog "Expected: $BINARY_FILE"
+            Write-ErrorLog "Available files:"
+            Get-ChildItem $extractDir -Recurse -File | Select-Object -First 10 | ForEach-Object { Write-Host "  $($_.FullName)" }
+            exit 1
+        }
+        
+        # Test binary
+        Write-InfoLog "Testing binary..."
+        try {
+            $testOutput = & $binaryPath --version 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-SuccessLog "Binary test passed"
+            } else {
+                # Try --help instead
+                $testOutput = & $binaryPath --help 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-SuccessLog "Binary test passed"
+                } else {
+                    Write-WarningLog "Binary test failed - binary may not work correctly"
+                }
+            }
+        } catch {
+            Write-WarningLog "Binary test failed: $_"
+        }
+        
+        # Determine install directory
+        if (-not $InstallDir) {
+            # Default to user-local installation
+            $InstallDir = Join-Path $env:USERPROFILE ".local\bin"
+            Write-InfoLog "Using default installation directory: $InstallDir"
+        }
+        
+        # Install binary
+        Write-InfoLog "Installing binary..."
+        if (-not (Install-Binary -SourcePath $binaryPath -InstallDir $InstallDir)) {
+            exit 1
+        }
+        
+        # Add to PATH if using default location
+        if ($InstallDir -eq (Join-Path $env:USERPROFILE ".local\bin")) {
+            Add-ToPath -Directory $InstallDir
+        }
+        
+        # Verify installation
+        Write-InfoLog "Verifying installation..."
+        $installedBinary = Join-Path $InstallDir $BINARY_FILE
+        
+        if (Test-Path $installedBinary) {
+            Write-SuccessLog "Installation completed successfully!"
+            Write-InfoLog "Binary location: $installedBinary"
+            
+            # Show version if possible
+            try {
+                $versionOutput = & $installedBinary --version 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-InfoLog "Installed version: $versionOutput"
+                }
+            } catch {
+                # Ignore version check errors
+            }
+            
+            Write-InfoLog "You can now use '$BINARY_NAME' from your terminal"
+            Write-InfoLog "You may need to restart your terminal or run 'refreshenv' to update PATH"
+        } else {
+            Write-ErrorLog "Installation verification failed"
+            exit 1
+        }
+        
+    } finally {
+        # Cleanup
+        Cleanup -TempDir $tempDir
+    }
+}
+
+# Run main installation
+try {
+    Install-Application
+} catch {
+    Write-ErrorLog "Installation failed with error: $_"
+    Write-ErrorLog $_.ScriptStackTrace
+    exit 1
+}

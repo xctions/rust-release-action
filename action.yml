@@ -1,0 +1,268 @@
+name: 'Multi-Platform Rust Release Builder'
+description: 'Build Rust binaries for multiple platforms and create releases with installation scripts'
+author: 'xctions'
+
+inputs:
+  rust-version:
+    description: 'Rust version to use'
+    required: false
+    default: 'stable'
+  cargo-args:
+    description: 'Additional cargo build arguments'
+    required: false
+    default: '--release'
+  binary-name:
+    description: 'Name of the binary to build'
+    required: true
+  release-tag:
+    description: 'Release tag to create'
+    required: true
+  github-token:
+    description: 'GitHub token for releases'
+    required: true
+  platforms:
+    description: 'Comma-separated list of platforms to build for (mac-arm64,linux-x86_64,linux-arm64,windows-x86_64,windows-arm64)'
+    required: false
+    default: 'mac-arm64,linux-x86_64,linux-arm64,windows-x86_64,windows-arm64'
+
+outputs:
+  release-url:
+    description: 'URL of the created release'
+    value: ${{ steps.create-release.outputs.upload_url }}
+  asset-urls:
+    description: 'JSON array of asset download URLs'
+    value: ${{ steps.build-matrix.outputs.asset-urls }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Parse platforms
+      id: parse-platforms
+      shell: bash
+      run: |
+        PLATFORMS="${{ inputs.platforms }}"
+        if [ -z "$PLATFORMS" ]; then
+          echo "Error: No platforms specified"
+          exit 1
+        fi
+        
+        # Validate platforms input (security: prevent injection)
+        if [[ "$PLATFORMS" =~ [\;\|\&\$\`\"\'] ]]; then
+          echo "Error: Invalid characters in platforms input"
+          echo "Platforms must only contain: alphanumeric, comma, dash, underscore"
+          exit 1
+        fi
+        
+        # Use the shared matrix generation script
+        if [[ -f "./scripts/generate-matrix.sh" ]]; then
+          # Create exclude list from platforms (inverse logic)
+          ALL_PLATFORMS="mac-arm64,linux-x86_64,linux-arm64,windows-x86_64,windows-arm64,mac-x86_64"
+          EXCLUDE_LIST=""
+          
+          if [[ -n "$PLATFORMS" ]]; then
+            IFS=',' read -ra REQUESTED_PLATFORMS <<< "$PLATFORMS"
+            IFS=',' read -ra ALL_PLATFORM_ARRAY <<< "$ALL_PLATFORMS"
+            
+            for all_platform in "${ALL_PLATFORM_ARRAY[@]}"; do
+              FOUND=false
+              for requested in "${REQUESTED_PLATFORMS[@]}"; do
+                requested=$(echo "$requested" | xargs)
+                if [[ "$all_platform" == "$requested" ]]; then
+                  FOUND=true
+                  break
+                fi
+              done
+              
+              if [[ "$FOUND" == false ]]; then
+                if [[ -n "$EXCLUDE_LIST" ]]; then
+                  EXCLUDE_LIST="$EXCLUDE_LIST,$all_platform"
+                else
+                  EXCLUDE_LIST="$all_platform"
+                fi
+              fi
+            done
+          fi
+          
+          # Generate matrix with exclusions
+          MATRIX_OUTPUT=$(./scripts/generate-matrix.sh --exclude="$EXCLUDE_LIST" 2>&1)
+          MATRIX_JSON=$(echo "$MATRIX_OUTPUT" | grep -A1 "GitHub Actions matrix format:" | tail -1)
+          
+          if [[ -z "$MATRIX_JSON" || "$MATRIX_JSON" == "GitHub Actions matrix format:" ]]; then
+            echo "Error: Failed to generate matrix from script"
+            echo "Script output: $MATRIX_OUTPUT"
+            exit 1
+          fi
+        else
+          echo "Error: Matrix generation script not found"
+          exit 1
+        fi
+        
+        echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
+        echo "Generated matrix: $MATRIX_JSON"
+
+    - name: Create Release
+      id: create-release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      with:
+        tag_name: ${{ inputs.release-tag }}
+        release_name: Release ${{ inputs.release-tag }}
+        draft: false
+        prerelease: false
+
+    - name: Build for all platforms
+      id: build-all
+      shell: bash
+      run: |
+        # Parse the matrix and build for each platform
+        MATRIX_JSON='${{ steps.parse-platforms.outputs.matrix }}'
+        echo "Matrix: $MATRIX_JSON"
+        
+        # Extract platforms from matrix
+        PLATFORMS=$(echo "$MATRIX_JSON" | jq -r '.include[].platform')
+        ASSET_URLS="[]"
+        
+        for platform in $PLATFORMS; do
+          echo "Building for platform: $platform"
+          
+          # Get platform details from matrix
+          OS=$(echo "$MATRIX_JSON" | jq -r ".include[] | select(.platform == \"$platform\") | .os")
+          TARGET=$(echo "$MATRIX_JSON" | jq -r ".include[] | select(.platform == \"$platform\") | .target")
+          
+          echo "Platform: $platform, OS: $OS, Target: $TARGET"
+          
+          # Validate rust version (security: prevent injection)
+          RUST_VERSION="${{ inputs.rust-version }}"
+          if [[ ! "$RUST_VERSION" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+            echo "Error: Invalid rust version format: $RUST_VERSION"
+            exit 1
+          fi
+          
+          # Install Rust toolchain with target
+          rustup toolchain install "$RUST_VERSION"
+          rustup target add "$TARGET" --toolchain "$RUST_VERSION"
+          
+          # Install cross-compilation dependencies for Linux ARM64
+          if [[ "$TARGET" == "aarch64-unknown-linux-gnu" ]]; then
+            if [[ "$RUNNER_OS" == "Linux" ]]; then
+              sudo apt-get update
+              sudo apt-get install -y gcc-aarch64-linux-gnu
+              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            fi
+          fi
+          
+          # Validate cargo args (security: prevent injection)
+          CARGO_ARGS="${{ inputs.cargo-args }}"
+          if [[ "$CARGO_ARGS" =~ [\;\|\&\$\`\"\'] ]]; then
+            echo "Error: Invalid characters in cargo-args"
+            echo "Cargo args cannot contain: ; | & $ \` \" '"
+            exit 1
+          fi
+          
+          # Build binary with error handling
+          echo "Building for target: $TARGET"
+          if ! cargo build --target "$TARGET" $CARGO_ARGS; then
+            echo "Error: Failed to build for target: $TARGET"
+            echo "Cargo args: $CARGO_ARGS"
+            exit 1
+          fi
+          
+          echo "Successfully built for target: $TARGET"
+          
+          # Validate binary name (security: prevent injection)
+          BINARY_NAME="${{ inputs.binary-name }}"
+          if [[ ! "$BINARY_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            echo "Error: Invalid binary name: $BINARY_NAME"
+            echo "Binary name must contain only: alphanumeric, dash, underscore"
+            exit 1
+          fi
+          
+          # Prepare binary for release
+          TARGET_DIR="target/$TARGET/release"
+          
+          # Add .exe extension for Windows
+          if [[ "$TARGET" == *"windows"* ]]; then
+            BINARY_NAME="${BINARY_NAME}.exe"
+          fi
+          
+          # Create release directory
+          mkdir -p release
+          
+          # Copy binary to release directory with platform suffix
+          RELEASE_BINARY="${BINARY_NAME}-${platform}"
+          if [[ "$TARGET" == *"windows"* ]]; then
+            RELEASE_BINARY="${RELEASE_BINARY}.exe"
+          fi
+          
+          if [[ ! -f "$TARGET_DIR/$BINARY_NAME" ]]; then
+            echo "Error: Binary not found: $TARGET_DIR/$BINARY_NAME"
+            echo "Available files in target directory:"
+            ls -la "$TARGET_DIR/" || echo "Target directory does not exist"
+            exit 1
+          fi
+          
+          if ! cp "$TARGET_DIR/$BINARY_NAME" "release/$RELEASE_BINARY"; then
+            echo "Error: Failed to copy binary to release directory"
+            exit 1
+          fi
+          
+          # Set executable permissions for non-Windows
+          if [[ "$TARGET" != *"windows"* ]]; then
+            chmod +x "release/$RELEASE_BINARY"
+          fi
+          
+          # Validate release tag (security: prevent injection)
+          RELEASE_TAG="${{ inputs.release-tag }}"
+          if [[ ! "$RELEASE_TAG" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+            echo "Error: Invalid release tag format: $RELEASE_TAG"
+            exit 1
+          fi
+          
+          # Generate installation script
+          if [[ -f "./scripts/generate-install-script.sh" ]]; then
+            if ! ./scripts/generate-install-script.sh \
+              "$BINARY_NAME" \
+              "$platform" \
+              "$RELEASE_TAG" \
+              "${{ github.repository }}"; then
+              echo "Warning: Failed to generate installation script for $platform"
+            fi
+          else
+            echo "Info: Installation script generator not found, skipping"
+          fi
+          
+          echo "Built binary: release/$RELEASE_BINARY"
+        done
+        
+        echo "asset-urls=$ASSET_URLS" >> $GITHUB_OUTPUT
+    
+    - name: Upload Release Assets
+      shell: bash
+      run: |
+        # Upload all built binaries and installation scripts
+        for file in release/*; do
+          if [[ -f "$file" ]]; then
+            filename=$(basename "$file")
+            echo "Uploading $filename"
+            
+            # Determine content type
+            if [[ "$filename" == *.sh ]]; then
+              content_type="application/x-sh"
+            else
+              content_type="application/octet-stream"
+            fi
+            
+            # Upload using GitHub CLI
+            gh release upload "${{ inputs.release-tag }}" "$file" --clobber
+          fi
+        done
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+
+branding:
+  icon: 'package'
+  color: 'orange'
