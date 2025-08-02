@@ -233,6 +233,73 @@ This workflow has been designed with security as a priority:
 
 For security issues, please see [SECURITY_IMPROVEMENTS.md](SECURITY_IMPROVEMENTS.md).
 
+## 📦 npm Publishing (Coming Soon)
+
+Extend your Rust releases to the npm ecosystem for easier installation and distribution.
+
+### Quick Start with npm
+
+```yaml
+jobs:
+  rust-release:
+    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
+    with:
+      binary_name: 'my-cli'
+      release-tag: ${{ github.ref_name }}
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  npm-publish:
+    needs: rust-release
+    uses: xctions/rust-release/.github/workflows/npm-publish.yml@v2
+    with:
+      source_tag: ${{ github.ref_name }}
+      package_name: 'my-cli'
+      npm_dist_tag: 'beta'  # Safe deployment strategy
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+### Benefits of npm Publishing
+
+- **Easy Installation**: `npm install -g my-cli`
+- **Node.js Ecosystem Integration**: Use in package.json scripts
+- **Automatic Updates**: `npm update -g my-cli`
+- **Cross-Platform**: Works on Windows, macOS, Linux
+
+### Safe Deployment Strategy
+
+```yaml
+# GitHub Release → npm Strategy
+v1.2.3 → 1.2.3-beta.0 (@beta)     # Safe testing
+# After validation:
+# npm dist-tag add my-cli@1.2.3-beta.0 latest
+```
+
+### npm Tag Options
+
+| npm Tag | Use Case | Unpublish Risk |
+|---------|----------|----------------|
+| `beta` | Testing releases | ⚠️ Moderate |
+| `alpha` | Early testing | ⚠️ Moderate |
+| `dev` | Development builds | ✅ Low |
+| `latest` | Production releases | ❌ High |
+
+### Advanced Features
+
+- **Platform Detection**: Automatically downloads correct binary
+- **Custom npm Registry**: Support for private registries
+- **Scoped Packages**: `@myorg/my-cli` support
+- **Multiple Binaries**: Publish different tools from same release
+
+### Documentation
+
+- **[📖 Complete npm Guide](NPM_PUBLISHING.md)** - Comprehensive npm publishing strategy
+- **[📋 Usage Examples](examples/npm-publish-usage.yml)** - Real-world workflow examples
+- **[🛡️ Security Best Practices](NPM_PUBLISHING.md#-best-practices)** - Safe deployment patterns
+
+**Note**: npm publishing feature is planned for v3. See [NPM_PUBLISHING.md](NPM_PUBLISHING.md) for detailed strategy and implementation timeline.
+
 ## 📄 License
 
 MIT
