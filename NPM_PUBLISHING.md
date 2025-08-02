@@ -10,34 +10,38 @@ This guide covers how to extend the rust-release workflow to publish your Rust b
 
 ### Understanding npm's Restrictions
 
-**Standard Versions (Permanent after 24 hours)**
-```
-1.0.0, 1.2.3, 2.0.0-stable
-```
-- Can only be unpublished within **24 hours** of publication
-- After 24 hours, requires npm support team intervention (rare exceptions only)
-- **High risk** for mistakes or breaking changes
+**Critical Fact: ALL versions (stable and prerelease) have IDENTICAL unpublish restrictions**
 
-**Prerelease Versions (More Flexible)**
-```
-1.0.0-beta.1, 1.2.3-alpha.0, 2.0.0-rc.1
-```
-- **Relatively easier** to unpublish (but still restricted)
-- Better for testing and validation
-- **Recommended** for initial deployments
+**Time-Based Restrictions:**
+- **72 hours** for newly created packages (if no dependencies)
+- **24-hour republish restriction** after complete package unpublish
+- **Permanent reservation** of name@version combinations
+
+**Dependency-Based Restrictions:**
+- Cannot unpublish if ANY other package depends on it
+- Registry immutability principle - once published, effectively permanent
+- No difference between `1.0.0` and `1.0.0-beta.1` restrictions
+
+**Why Prerelease Versions Seem "Safer":**
+- ✅ **Lower visibility** - not installed by default
+- ✅ **Explicit installation** required (`npm install pkg@beta`)
+- ✅ **Mistake prevention** - won't accidentally become `latest`
+- ❌ **NOT easier to unpublish** - same 72-hour/dependency rules apply
 
 ## 🏷️ npm Tag System Deep Dive
 
 ### System Tags
 
-| Tag | Purpose | Install Command | Unpublish Difficulty |
-|-----|---------|----------------|---------------------|
-| `latest` | Default stable release | `npm install pkg` | ❌ Very Hard |
-| `beta` | Beta testing | `npm install pkg@beta` | ⚠️ Moderate |
-| `alpha` | Alpha testing | `npm install pkg@alpha` | ⚠️ Moderate |
-| `next` | Next major version preview | `npm install pkg@next` | ⚠️ Moderate |
-| `dev` | Development builds | `npm install pkg@dev` | ✅ Easier |
-| `experimental` | Experimental features | `npm install pkg@experimental` | ✅ Easier |
+| Tag | Purpose | Install Command | Risk Level |
+|-----|---------|----------------|-------------|
+| `latest` | Default stable release | `npm install pkg` | 🔴 Very High (default install) |
+| `beta` | Beta testing | `npm install pkg@beta` | 🟡 Medium (visible, commonly used) |
+| `alpha` | Alpha testing | `npm install pkg@alpha` | 🟡 Medium (visible, commonly used) |
+| `next` | Next major version preview | `npm install pkg@next` | 🟡 Medium (visible, commonly used) |
+| `dev` | Development builds | `npm install pkg@dev` | 🟢 Low (custom, less visible) |
+| `experimental` | Experimental features | `npm install pkg@experimental` | 🟢 Low (custom, less visible) |
+
+**Note**: Unpublish restrictions are IDENTICAL for all tags. Risk level refers to impact of mistakes, not unpublish difficulty.
 
 ### Custom Tags (Recommended for Safety)
 
@@ -50,9 +54,10 @@ npm publish --tag testing
 ```
 
 **Benefits of Custom Tags:**
-- Less visibility = lower risk
-- Easier to unpublish
-- Clear separation from production
+- **Lower visibility** = reduced mistake impact
+- **Same unpublish restrictions** but less user exposure
+- **Clear separation** from production environments
+- **Explicit user intent** required for installation
 
 ## 🚀 Safe Deployment Strategies
 
@@ -206,17 +211,20 @@ npm view my-package versions --json
 
 ### If You Need to Unpublish
 
-**Within 24 hours:**
+**Within 72 hours (new packages only):**
 ```bash
+# Only if no other packages depend on it
 npm unpublish my-package@1.2.3
 ```
 
-**After 24 hours (prerelease only):**
+**After 72 hours or if dependencies exist:**
 ```bash
-# Contact npm support with justification
-# Or deprecate instead
-npm deprecate my-package@1.2.3 "This version has critical issues"
+# npm support rarely grants unpublish requests
+# Use deprecation instead - much more practical
+npm deprecate my-package@1.2.3 "This version has critical issues - use @1.2.4"
 ```
+
+**Important**: There are NO special unpublish rules for prerelease versions. All versions follow the same 72-hour/dependency restrictions.
 
 ### Alternative: Deprecation
 ```bash
