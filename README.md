@@ -34,7 +34,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      # binaries is optional - uses repository name by default
+      # binary_name is optional - uses repository name by default
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -44,7 +44,7 @@ jobs:
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `binaries` | Comma-separated list of binary names | No | Repository name |
+| `binary_name` | Binary name | No | Repository name |
 | `release-tag` | Release tag to create | Yes | |
 | `include` | JSON array of custom platforms | No | Default matrix |
 | `exclude` | Comma-separated platforms to exclude | No | |
@@ -79,19 +79,19 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      # No binaries specified - uses repository name automatically
+      # No binary_name specified - uses repository name automatically
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### Multiple Binaries
+### Custom Binary Name
 ```yaml
 jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binaries: 'my-app,my-cli,my-daemon'
+      binary_name: 'my-custom-app'
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -128,13 +128,13 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### Advanced Configuration with Custom Binary Name
+### Advanced Configuration
 ```yaml
 jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binaries: 'my-custom-app'  # Override repository name
+      binary_name: 'my-custom-app'  # Override repository name
       release-tag: ${{ github.ref_name }}
       rust-version: '1.75.0'
       cargo-args: '--release --locked --no-default-features --features production'
@@ -218,7 +218,7 @@ The new v2 reusable workflow replaces the composite action with enhanced securit
 ```yaml
 uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
 with:
-  # binaries is now optional - uses repository name by default
+  # binary_name is now optional - uses repository name by default
   exclude: 'linux-arm64,windows-x86_64,windows-arm64'
 ```
 

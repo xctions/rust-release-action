@@ -54,7 +54,7 @@ jobs:
     name: Validate Inputs
     runs-on: ubuntu-latest
     outputs:
-      validated-binaries: ${{ steps.validate.outputs.binaries }}
+      binary_name: ${{ steps.validate.outputs.binary_name }}
       build-matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - name: Checkout code
@@ -65,35 +65,25 @@ jobs:
         shell: bash
         run: |
           # Set default binary name from repository if not provided
-          BINARIES="${{ inputs.binaries }}"
-          if [[ -z "$BINARIES" ]]; then
+          BINARY_NAME="${{ inputs.binary_name }}"
+          if [[ -z "$BINARY_NAME" ]]; then
             REPO_NAME="${{ github.event.repository.name }}"
-            echo "No binaries specified, using repository name: $REPO_NAME"
-            BINARIES="$REPO_NAME"
+            echo "No binary name specified, using repository name: $REPO_NAME"
+            BINARY_NAME="$REPO_NAME"
           fi
           
-          # Validate binaries are not empty after default setting
-          if [[ -z "$BINARIES" ]]; then
-            echo "Error: Could not determine binary names (repository name is empty)"
+          # Validate binary name is not empty after default setting
+          if [[ -z "$BINARY_NAME" ]]; then
+            echo "Error: Could not determine binary name (repository name is empty)"
             exit 1
           fi
           
-          # Validate binary names (alphanumeric, dash, underscore only)
-          IFS=',' read -ra BINARY_ARRAY <<< "$BINARIES"
-          VALIDATED_BINARIES=""
-          for binary in "${BINARY_ARRAY[@]}"; do
-            binary=$(echo "$binary" | xargs) # trim whitespace
-            if [[ ! "$binary" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-              echo "Error: Invalid binary name: $binary"
-              echo "Binary names must contain only alphanumeric characters, dashes and underscores"
-              exit 1
-            fi
-            if [[ -n "$VALIDATED_BINARIES" ]]; then
-              VALIDATED_BINARIES="$VALIDATED_BINARIES,$binary"
-            else
-              VALIDATED_BINARIES="$binary"
-            fi
-          done
+          # Validate binary name (alphanumeric, dash, underscore only)
+          if [[ ! "$BINARY_NAME" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ ${#BINARY_NAME} -gt 50 ]]; then
+            echo "Error: Invalid binary name or too long: $BINARY_NAME"
+            echo "Binary name must contain only alphanumeric characters, dashes and underscores"
+            exit 1
+          fi
           
           # Validate cargo args (enhanced security)
           CARGO_ARGS="${{ inputs.cargo-args }}"
@@ -121,8 +111,8 @@ jobs:
             echo "Warning: Rust version '$RUST_VERSION' may not be a standard version"
           fi
           
-          echo "binaries=$VALIDATED_BINARIES" >> $GITHUB_OUTPUT
-          echo "Validated binaries: $VALIDATED_BINARIES"
+          echo "binary_name=$BINARY_NAME" >> $GITHUB_OUTPUT
+          echo "Validated binary name: $BINARY_NAME"
 
       - name: Validate release tag
         shell: bash
@@ -239,111 +229,96 @@ jobs:
       - name: Build binaries
         shell: bash
         run: |
-          # Build each binary specified in the input
-          IFS=',' read -ra BINARY_ARRAY <<< "${{ needs.validate-inputs.outputs.validated-binaries }}"
+          # Get binary name from validation
+          BINARY_NAME="${{ needs.validate-inputs.outputs.binary_name }}"
           
           # Create release directory
           mkdir -p release
           
-          for binary in "${BINARY_ARRAY[@]}"; do
-            binary=$(echo "$binary" | xargs) # trim whitespace
-            echo "Building binary: $binary for target: ${{ matrix.target }}"
+          echo "Building binary: $BINARY_NAME for target: ${{ matrix.target }}"
             
-            # Validate binary name before build (additional security)
-            if [[ ! "$binary" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ ${#binary} -gt 50 ]]; then
-              echo "Error: Invalid binary name or too long: $binary"
+          # Check if binary exists in Cargo.toml
+          if ! cargo metadata --format-version 1 | jq -e --arg bin "$BINARY_NAME" '.packages[].targets[] | select(.name == $bin and (.kind[] | contains("bin")))' > /dev/null; then
+            echo "Error: Binary '$BINARY_NAME' not found in Cargo.toml"
+            echo "Available binaries:"
+            cargo metadata --format-version 1 | jq -r '.packages[].targets[] | select(.kind[] | contains("bin")) | .name' || echo "Could not list binaries"
+            exit 1
+          fi
+          
+          if ! cargo build --bin "$BINARY_NAME" --target ${{ matrix.target }} ${{ inputs.cargo-args }}; then
+            echo "Error: Failed to build binary '$BINARY_NAME' for target '${{ matrix.target }}'"
+            echo "Cargo args: ${{ inputs.cargo-args }}"
+            exit 1
+          fi
+          
+          echo "Successfully built binary: $BINARY_NAME"
+            
+          # Determine binary extension
+          BINARY_EXT=""
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            BINARY_EXT=".exe"
+          fi
+          
+          SOURCE_BINARY="target/${{ matrix.target }}/release/${BINARY_NAME}${BINARY_EXT}"
+          TARGET_BINARY="release/${BINARY_NAME}-${{ matrix.platform }}${BINARY_EXT}"
+            
+          # Copy binary to release directory with better error handling
+          if [[ ! -f "$SOURCE_BINARY" ]]; then
+            echo "Error: Binary not found: $SOURCE_BINARY"
+            echo "Expected binary location: $SOURCE_BINARY"
+            echo "Available files in target directory:"
+            find "target/${{ matrix.target }}/release" -type f -executable 2>/dev/null || echo "Target directory not found or no executable files"
+            exit 1
+          fi
+          
+          if ! cp "$SOURCE_BINARY" "$TARGET_BINARY"; then
+            echo "Error: Failed to copy binary from $SOURCE_BINARY to $TARGET_BINARY"
+            exit 1
+          fi
+          
+          # Set executable permissions for non-Windows
+          if [[ "${{ matrix.target }}" != *"windows"* ]]; then
+            if ! chmod +x "$TARGET_BINARY"; then
+              echo "Error: Failed to set executable permissions on $TARGET_BINARY"
               exit 1
             fi
-            
-            # Build the specific binary with enhanced error handling
-            echo "Building binary: $binary for target: ${{ matrix.target }}"
-            
-            # Check if binary exists in Cargo.toml
-            if ! cargo metadata --format-version 1 | jq -e --arg bin "$binary" '.packages[].targets[] | select(.name == $bin and (.kind[] | contains("bin")))' > /dev/null; then
-              echo "Error: Binary '$binary' not found in Cargo.toml"
-              echo "Available binaries:"
-              cargo metadata --format-version 1 | jq -r '.packages[].targets[] | select(.kind[] | contains("bin")) | .name' || echo "Could not list binaries"
-              exit 1
-            fi
-            
-            if ! cargo build --bin "$binary" --target ${{ matrix.target }} ${{ inputs.cargo-args }}; then
-              echo "Error: Failed to build binary '$binary' for target '${{ matrix.target }}'"
-              echo "Cargo args: ${{ inputs.cargo-args }}"
-              exit 1
-            fi
-            
-            echo "Successfully built binary: $binary"
-            
-            # Determine binary extension
-            BINARY_EXT=""
-            if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-              BINARY_EXT=".exe"
-            fi
-            
-            SOURCE_BINARY="target/${{ matrix.target }}/release/${binary}${BINARY_EXT}"
-            TARGET_BINARY="release/${binary}-${{ matrix.platform }}${BINARY_EXT}"
-            
-            # Copy binary to release directory with better error handling
-            if [[ ! -f "$SOURCE_BINARY" ]]; then
-              echo "Error: Binary not found: $SOURCE_BINARY"
-              echo "Expected binary location: $SOURCE_BINARY"
-              echo "Available files in target directory:"
-              find "target/${{ matrix.target }}/release" -type f -executable 2>/dev/null || echo "Target directory not found or no executable files"
-              exit 1
-            fi
-            
-            if ! cp "$SOURCE_BINARY" "$TARGET_BINARY"; then
-              echo "Error: Failed to copy binary from $SOURCE_BINARY to $TARGET_BINARY"
-              exit 1
-            fi
-            
-            # Set executable permissions for non-Windows
-            if [[ "${{ matrix.target }}" != *"windows"* ]]; then
-              if ! chmod +x "$TARGET_BINARY"; then
-                echo "Error: Failed to set executable permissions on $TARGET_BINARY"
-                exit 1
-              fi
-            fi
-            
-            # Verify the binary was created successfully
-            if [[ ! -f "$TARGET_BINARY" ]]; then
-              echo "Error: Target binary was not created: $TARGET_BINARY"
-              exit 1
-            fi
-            
-            echo "Successfully built and copied: $TARGET_BINARY"
-          done
+          fi
+          
+          # Verify the binary was created successfully
+          if [[ ! -f "$TARGET_BINARY" ]]; then
+            echo "Error: Target binary was not created: $TARGET_BINARY"
+            exit 1
+          fi
+          
+          echo "Successfully built and copied: $TARGET_BINARY"
 
       - name: Create archives
         if: inputs.create-archives
         shell: bash
         run: |
-          IFS=',' read -ra BINARY_ARRAY <<< "${{ needs.validate-inputs.outputs.validated-binaries }}"
+          BINARY_NAME="${{ needs.validate-inputs.outputs.binary_name }}"
           
-          for binary in "${BINARY_ARRAY[@]}"; do
-            binary=$(echo "$binary" | xargs)
+          # Determine binary extension and archive format
+          BINARY_EXT=""
+          ARCHIVE_EXT="tar.gz"
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            BINARY_EXT=".exe"
+            ARCHIVE_EXT="zip"
+          fi
+          
+          BINARY_FILE="${BINARY_NAME}-${{ matrix.platform }}${BINARY_EXT}"
+          ARCHIVE_NAME="${BINARY_NAME}-${{ inputs.release-tag }}-${{ matrix.platform }}"
             
-            # Determine binary extension and archive format
-            BINARY_EXT=""
-            ARCHIVE_EXT="tar.gz"
-            if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-              BINARY_EXT=".exe"
-              ARCHIVE_EXT="zip"
-            fi
+          if [[ -f "release/$BINARY_FILE" ]]; then
+            # Create temporary directory for archive contents
+            mkdir -p "temp-archive/$ARCHIVE_NAME"
+            cp "release/$BINARY_FILE" "temp-archive/$ARCHIVE_NAME/"
             
-            BINARY_FILE="${binary}-${{ matrix.platform }}${BINARY_EXT}"
-            ARCHIVE_NAME="${binary}-${{ inputs.release-tag }}-${{ matrix.platform }}"
-            
-            if [[ -f "release/$BINARY_FILE" ]]; then
-              # Create temporary directory for archive contents
-              mkdir -p "temp-archive/$ARCHIVE_NAME"
-              cp "release/$BINARY_FILE" "temp-archive/$ARCHIVE_NAME/"
-              
-              # Add README to archive
-              cat > "temp-archive/$ARCHIVE_NAME/README.md" << EOF
-# $binary ${{ inputs.release-tag }}
+            # Add README to archive
+            cat > "temp-archive/$ARCHIVE_NAME/README.md" << EOF
+# $BINARY_NAME ${{ inputs.release-tag }}
 
-This archive contains the $binary binary for ${{ matrix.platform }}.
+This archive contains the $BINARY_NAME binary for ${{ matrix.platform }}.
 
 ## Installation
 
@@ -352,7 +327,7 @@ Extract the binary and place it in your PATH.
 For Unix-like systems:
 \`\`\`bash
 chmod +x $BINARY_FILE
-sudo mv $BINARY_FILE /usr/local/bin/${binary}
+sudo mv $BINARY_FILE /usr/local/bin/${BINARY_NAME}
 \`\`\`
 
 ## Platform Information
@@ -363,21 +338,20 @@ sudo mv $BINARY_FILE /usr/local/bin/${binary}
 Built with rust-release GitHub Action
 EOF
               
-              # Create archive
-              cd temp-archive
-              if [[ "$ARCHIVE_EXT" == "zip" ]]; then
-                zip -r "../release/${ARCHIVE_NAME}.zip" "$ARCHIVE_NAME"
-              else
-                tar -czf "../release/${ARCHIVE_NAME}.tar.gz" "$ARCHIVE_NAME"
-              fi
-              cd ..
-              
-              # Clean up
-              rm -rf temp-archive
-              
-              echo "Created archive: release/${ARCHIVE_NAME}.${ARCHIVE_EXT}"
+            # Create archive
+            cd temp-archive
+            if [[ "$ARCHIVE_EXT" == "zip" ]]; then
+              zip -r "../release/${ARCHIVE_NAME}.zip" "$ARCHIVE_NAME"
+            else
+              tar -czf "../release/${ARCHIVE_NAME}.tar.gz" "$ARCHIVE_NAME"
             fi
-          done
+            cd ..
+            
+            # Clean up
+            rm -rf temp-archive
+            
+            echo "Created archive: release/${ARCHIVE_NAME}.${ARCHIVE_EXT}"
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

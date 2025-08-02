@@ -11,7 +11,7 @@ inputs:
     description: 'Additional cargo build arguments'
     required: false
     default: '--release'
-  binary-name:
+  binary_name:
     description: 'Name of the binary to build (defaults to repository name)'
     required: false
     default: ''
@@ -45,7 +45,7 @@ runs:
       shell: bash
       run: |
         # Set default binary name from repository if not provided
-        BINARY_NAME="${{ inputs.binary-name }}"
+        BINARY_NAME="${{ inputs.binary_name }}"
         if [[ -z "$BINARY_NAME" ]]; then
           REPO_NAME="${{ github.event.repository.name }}"
           echo "No binary name specified, using repository name: $REPO_NAME"
@@ -59,7 +59,7 @@ runs:
         fi
         
         # Store binary name for later use
-        echo "binary-name=$BINARY_NAME" >> $GITHUB_OUTPUT
+        echo "binary_name=$BINARY_NAME" >> $GITHUB_OUTPUT
         
         PLATFORMS="${{ inputs.platforms }}"
         if [ -z "$PLATFORMS" ]; then
@@ -192,7 +192,7 @@ runs:
           echo "Successfully built for target: $TARGET"
           
           # Get binary name from previous step
-          BINARY_NAME="${{ steps.parse-platforms.outputs.binary-name }}"
+          BINARY_NAME="${{ steps.parse-platforms.outputs.binary_name }}"
           
           # Validate binary name (security: prevent injection)
           if [[ ! "$BINARY_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
