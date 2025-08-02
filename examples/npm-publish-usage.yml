@@ -14,7 +14,7 @@ on:
         required: true
         default: 'v0.1.0'
       npm_tag:
-        description: 'npm dist-tag (latest, beta, alpha, dev)'
+        description: 'npm dist-tag (latest, beta, alpha, rc)'
         required: false
         default: 'beta'
 
@@ -43,7 +43,7 @@ jobs:
       # npm package configuration
       package_name: 'my-cli'  # npm package name (can differ from binary name)
       
-      # Safe deployment: always use beta first, promote to latest manually
+      # REQUIRED: Explicit npm dist-tag (no default for safety)
       npm_dist_tag: ${{ github.event.inputs.npm_tag || 'beta' }}
       
       # Optional: package description
@@ -54,6 +54,41 @@ jobs:
       
       # Optional: custom binary name in npm (defaults to package_name)
       binary_name: 'my-cli'
+      
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+---
+
+# GitHub Release Event-Based Publishing (Recommended)
+name: GitHub Release to npm
+
+on:
+  release:
+    types: [published]  # Triggered when GitHub Release is published
+
+jobs:
+  npm-publish:
+    # Skip if release is a draft
+    if: github.event.release.draft == false
+    uses: xctions/rust-release/.github/workflows/npm-publish.yml@v2
+    with:
+      # Source from the published release
+      source_tag: ${{ github.event.release.tag_name }}
+      package_name: 'my-cli'
+      
+      # Smart tag mapping based on TAG_STRATEGY.md
+      npm_dist_tag: ${{ 
+        github.event.release.prerelease == true && (
+          contains(github.event.release.tag_name, 'alpha') && 'alpha' ||
+          contains(github.event.release.tag_name, 'beta') && 'beta' ||
+          contains(github.event.release.tag_name, 'rc') && 'rc' ||
+          'beta'
+        ) || 'latest'
+      }}
+      
+      package_description: 'Fast CLI tool built with Rust'
+      package_keywords: 'cli,rust,performance'
       
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -89,11 +124,11 @@ jobs:
       source_tag: ${{ github.ref_name }}
       package_name: '@myorg/advanced-cli'  # Scoped package
       
-      # Smart tag mapping based on GitHub tag
+      # Smart tag mapping based on GitHub tag (manual mode)
       npm_dist_tag: ${{ 
         contains(github.ref_name, 'alpha') && 'alpha' ||
         contains(github.ref_name, 'beta') && 'beta' ||
-        contains(github.ref_name, 'rc') && 'next' ||
+        contains(github.ref_name, 'rc') && 'rc' ||
         endsWith(github.ref_name, '-stable') && 'latest' ||
         'beta'
       }}
@@ -227,7 +262,7 @@ jobs:
     with:
       source_tag: ${{ github.ref_name }}
       package_name: 'tested-cli'
-      npm_dist_tag: 'testing'  # Custom safe tag
+      npm_dist_tag: 'beta'  # Safe beta tag for testing
       package_description: 'CLI tool with comprehensive testing'
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -239,8 +274,8 @@ jobs:
     steps:
       - name: Install and test npm package
         run: |
-          # Install from testing tag
-          npm install -g tested-cli@testing
+          # Install from beta tag
+          npm install -g tested-cli@beta
           
           # Run basic tests
           tested-cli --version
@@ -257,18 +292,18 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
         run: |
-          npm install -g tested-cli@testing
+          npm install -g tested-cli@beta
           tested-cli --version
 
-  # Promote to beta only after validation
-  npm-promote-to-beta:
+  # Promote to latest only after validation
+  npm-promote-to-latest:
     needs: validate-npm-package
     runs-on: ubuntu-latest
     steps:
-      - name: Promote testing to beta
+      - name: Promote beta to latest
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          npm dist-tag add tested-cli@${VERSION}-testing.0 beta
+          npm dist-tag add tested-cli@${VERSION}-beta.0 latest
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
