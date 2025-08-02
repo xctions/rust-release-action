@@ -4,9 +4,10 @@ on:
   workflow_call:
     inputs:
       binaries:
-        description: 'Comma-separated list of binary names to build'
-        required: true
+        description: 'Comma-separated list of binary names to build (defaults to repository name)'
+        required: false
         type: string
+        default: ''
       include:
         description: 'JSON array of platforms to include (optional - overrides defaults)'
         required: false
@@ -63,10 +64,17 @@ jobs:
         id: validate
         shell: bash
         run: |
-          # Validate binaries input
+          # Set default binary name from repository if not provided
           BINARIES="${{ inputs.binaries }}"
           if [[ -z "$BINARIES" ]]; then
-            echo "Error: binaries input is required"
+            REPO_NAME="${{ github.event.repository.name }}"
+            echo "No binaries specified, using repository name: $REPO_NAME"
+            BINARIES="$REPO_NAME"
+          fi
+          
+          # Validate binaries are not empty after default setting
+          if [[ -z "$BINARIES" ]]; then
+            echo "Error: Could not determine binary names (repository name is empty)"
             exit 1
           fi
           

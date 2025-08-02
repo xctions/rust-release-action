@@ -20,6 +20,7 @@ This reusable workflow addresses critical security vulnerabilities found in simi
 - 🎯 **Flexible platform targeting** - Include/exclude specific platforms
 - 📥 **Secure install scripts** - Hardened installation with integrity checks
 - 🏗️ **Professional structure** - Follows zoxide's release asset patterns
+- 🎯 **Smart defaults** - Automatically uses repository name as binary name
 
 ## 🚀 Quick Start
 
@@ -33,7 +34,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binaries: 'my-app'
+      # binaries is optional - uses repository name by default
       release-tag: ${{ github.ref_name }}
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -43,7 +44,7 @@ jobs:
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `binaries` | Comma-separated list of binary names | Yes | |
+| `binaries` | Comma-separated list of binary names | No | Repository name |
 | `release-tag` | Release tag to create | Yes | |
 | `include` | JSON array of custom platforms | No | Default matrix |
 | `exclude` | Comma-separated platforms to exclude | No | |
@@ -72,6 +73,18 @@ jobs:
 
 ## 📚 Examples
 
+### Single Binary (using repository name)
+```yaml
+jobs:
+  release:
+    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
+    with:
+      # No binaries specified - uses repository name automatically
+      release-tag: ${{ github.ref_name }}
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
 ### Multiple Binaries
 ```yaml
 jobs:
@@ -90,7 +103,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binaries: 'my-app'
+      # Uses repository name as binary name
       exclude: 'windows-arm64,linux-arm64'
       release-tag: ${{ github.ref_name }}
     secrets:
@@ -103,7 +116,7 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binaries: 'my-app'
+      # Uses repository name as binary name
       include: |
         [
           {"target": "x86_64-unknown-linux-gnu", "os": "ubuntu-latest", "platform": "linux-x86_64"},
@@ -115,13 +128,13 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### Advanced Configuration
+### Advanced Configuration with Custom Binary Name
 ```yaml
 jobs:
   release:
     uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
     with:
-      binaries: 'my-app'
+      binaries: 'my-custom-app'  # Override repository name
       release-tag: ${{ github.ref_name }}
       rust-version: '1.75.0'
       cargo-args: '--release --locked --no-default-features --features production'
@@ -205,7 +218,7 @@ The new v2 reusable workflow replaces the composite action with enhanced securit
 ```yaml
 uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
 with:
-  binaries: 'my-app'
+  # binaries is now optional - uses repository name by default
   exclude: 'linux-arm64,windows-x86_64,windows-arm64'
 ```
 
