@@ -1,10 +1,10 @@
-name: Rust Release
+name: Rust Build & Release
 
 on:
   workflow_call:
     inputs:
       binary-name:
-        description: 'Binary name to build (defaults to repository name)'
+        description: 'Binary name (defaults to repository name)'
         required: false
         type: string
         default: ''
@@ -28,149 +28,107 @@ on:
         required: true
         type: string
       generate-checksums:
-        description: 'Generate SHA256 checksums file'
+        description: 'Generate SHA256 checksums'
         required: false
         type: boolean
         default: true
       create-archives:
-        description: 'Create tar.gz/zip archives for each binary'
+        description: 'Create tar.gz/zip archives'
         required: false
         type: boolean
         default: true
+      # npm publishing options
+      enable-npm:
+        description: 'Enable npm publishing'
+        required: false
+        type: boolean
+        default: false
+      npm-package-name:
+        description: 'npm package name (required if enable-npm=true)'
+        required: false
+        type: string
+        default: ''
+      npm-dist-tag:
+        description: 'npm dist-tag (latest, beta, alpha, rc, dev)'
+        required: false
+        type: string
+        default: 'latest'
+      npm-description:
+        description: 'Package description'
+        required: false
+        type: string
+        default: ''
     secrets:
       GITHUB_TOKEN:
         required: true
+      NPM_TOKEN:
+        required: false
 
 env:
   CARGO_TERM_COLOR: always
+  # Default platform matrix - simple hardcoded list
+  PLATFORMS: '[
+    {"target": "x86_64-unknown-linux-gnu", "os": "ubuntu-latest", "platform": "linux-x86_64"},
+    {"target": "aarch64-unknown-linux-gnu", "os": "ubuntu-latest", "platform": "linux-arm64"},
+    {"target": "x86_64-unknown-linux-musl", "os": "ubuntu-latest", "platform": "linux-x86_64-musl"},
+    {"target": "aarch64-unknown-linux-musl", "os": "ubuntu-latest", "platform": "linux-arm64-musl"},
+    {"target": "x86_64-apple-darwin", "os": "macos-12", "platform": "mac-x86_64"},
+    {"target": "aarch64-apple-darwin", "os": "macos-latest", "platform": "mac-arm64"},
+    {"target": "x86_64-pc-windows-msvc", "os": "windows-latest", "platform": "windows-x86_64"},
+    {"target": "aarch64-pc-windows-msvc", "os": "windows-latest", "platform": "windows-arm64"}
+  ]'
 
 jobs:
-  validate-inputs:
-    name: Validate Inputs
-    runs-on: ubuntu-latest
-    outputs:
-      binary-name: ${{ steps.validate.outputs.binary-name }}
-      build-matrix: ${{ steps.matrix.outputs.matrix }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Validate inputs
-        id: validate
-        shell: bash
-        run: |
-          # Set default binary name from repository if not provided
-          BINARY_NAME="${{ inputs.binary-name }}"
-          if [[ -z "$BINARY_NAME" ]]; then
-            REPO_NAME="${{ github.event.repository.name }}"
-            echo "No binary name specified, using repository name: $REPO_NAME"
-            BINARY_NAME="$REPO_NAME"
-          fi
-          
-          # Validate binary name is not empty after default setting
-          if [[ -z "$BINARY_NAME" ]]; then
-            echo "Error: Could not determine binary name (repository name is empty)"
-            exit 1
-          fi
-          
-          # Validate binary name (alphanumeric, dash, underscore only)
-          if [[ ! "$BINARY_NAME" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ ${#BINARY_NAME} -gt 50 ]]; then
-            echo "Error: Invalid binary name or too long: $BINARY_NAME"
-            echo "Binary name must contain only alphanumeric characters, dashes and underscores"
-            exit 1
-          fi
-          
-          # Validate cargo args (enhanced security)
-          CARGO_ARGS="${{ inputs.cargo-args }}"
-          if [[ "$CARGO_ARGS" =~ [\;\|\&\$\`\"\'] ]]; then
-            echo "Error: Invalid characters in cargo-args"
-            echo "Cargo args cannot contain: ; | & $ \` \" '"
-            exit 1
-          fi
-          
-          # Additional validation: ensure cargo args start with valid flags
-          if [[ -n "$CARGO_ARGS" && ! "$CARGO_ARGS" =~ ^[[:space:]]*-- ]]; then
-            echo "Error: cargo-args must start with '--' flags"
-            exit 1
-          fi
-          
-          # Validate rust version (enhanced)
-          RUST_VERSION="${{ inputs.rust-version }}"
-          if [[ ! "$RUST_VERSION" =~ ^[a-zA-Z0-9.-]+$ ]] || [[ ${#RUST_VERSION} -gt 20 ]]; then
-            echo "Error: Invalid rust version format or too long: $RUST_VERSION"
-            exit 1
-          fi
-          
-          # Validate against known rust version patterns
-          if [[ ! "$RUST_VERSION" =~ ^(stable|beta|nightly|[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-            echo "Warning: Rust version '$RUST_VERSION' may not be a standard version"
-          fi
-          
-          echo "binary-name=$BINARY_NAME" >> $GITHUB_OUTPUT
-          echo "Validated binary name: $BINARY_NAME"
-
-      - name: Validate release tag
-        shell: bash
-        run: |
-          RELEASE_TAG="${{ inputs.release-tag }}"
-          if [[ ! "$RELEASE_TAG" =~ ^[a-zA-Z0-9v._-]+$ ]] || [[ ${#RELEASE_TAG} -gt 50 ]]; then
-            echo "Error: Invalid release tag format or too long: $RELEASE_TAG"
-            exit 1
-          fi
-
-      - name: Generate build matrix
-        id: matrix
-        shell: bash
-        run: |
-          # Default platform matrix (including musl targets for flexibility)
-          DEFAULT_MATRIX='[
-            {"target": "x86_64-unknown-linux-gnu", "os": "ubuntu-latest", "platform": "linux-x86_64"},
-            {"target": "aarch64-unknown-linux-gnu", "os": "ubuntu-latest", "platform": "linux-arm64"},
-            {"target": "x86_64-unknown-linux-musl", "os": "ubuntu-latest", "platform": "linux-x86_64-musl"},
-            {"target": "aarch64-unknown-linux-musl", "os": "ubuntu-latest", "platform": "linux-arm64-musl"},
-            {"target": "x86_64-apple-darwin", "os": "macos-12", "platform": "mac-x86_64"},
-            {"target": "aarch64-apple-darwin", "os": "macos-latest", "platform": "mac-arm64"},
-            {"target": "x86_64-pc-windows-msvc", "os": "windows-latest", "platform": "windows-x86_64"},
-            {"target": "aarch64-pc-windows-msvc", "os": "windows-latest", "platform": "windows-arm64"}
-          ]'
-          
-          MATRIX="$DEFAULT_MATRIX"
-          
-          # Apply exclude filter if provided
-          EXCLUDE_INPUT="${{ inputs.exclude }}"
-          if [[ -n "$EXCLUDE_INPUT" && "$EXCLUDE_INPUT" != "" ]]; then
-            IFS=',' read -ra EXCLUDE_ARRAY <<< "$EXCLUDE_INPUT"
-            for exclude_platform in "${EXCLUDE_ARRAY[@]}"; do
-              exclude_platform=$(echo "$exclude_platform" | xargs) # trim whitespace
-              # Validate exclude platform name (enhanced)
-              if [[ ! "$exclude_platform" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ ${#exclude_platform} -gt 30 ]]; then
-                echo "Error: Invalid exclude platform name or too long: $exclude_platform"
-                exit 1
-              fi
-              
-              # Check if platform exists in matrix before excluding
-              if ! echo "$MATRIX" | jq -e --arg platform "$exclude_platform" '.[] | select(.platform == $platform)' > /dev/null; then
-                echo "Warning: Platform '$exclude_platform' not found in matrix, skipping exclude"
-                continue
-              fi
-              MATRIX=$(echo "$MATRIX" | jq --arg platform "$exclude_platform" 'map(select(.platform != $platform))')
-            done
-          fi
-          
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
-          echo "Generated matrix:"
-          echo "$MATRIX" | jq .
-
   build:
     name: Build (${{ matrix.platform }})
-    needs: validate-inputs
     runs-on: ${{ matrix.os }}
+    outputs:
+      binary-name: ${{ steps.setup.outputs.binary-name }}
+      filtered-platforms: ${{ steps.filter-platforms.outputs.platforms }}
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJson(needs.validate-inputs.outputs.build-matrix) }}
+        include: ${{ fromJson(steps.filter-platforms.outputs.platforms) }}
     
     steps:
+      - name: Filter platforms
+        id: filter-platforms
+        shell: bash
+        run: |
+          PLATFORMS='${{ env.PLATFORMS }}'
+          EXCLUDE_INPUT="${{ inputs.exclude }}"
+          
+          if [[ -z "$EXCLUDE_INPUT" ]]; then
+            echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
+          else
+            # Simple filtering using jq
+            EXCLUDE_FILTER=""
+            IFS=',' read -ra EXCLUDE_ARRAY <<< "$EXCLUDE_INPUT"
+            for exclude_platform in "${EXCLUDE_ARRAY[@]}"; do
+              exclude_platform=$(echo "$exclude_platform" | xargs)
+              if [[ -n "$EXCLUDE_FILTER" ]]; then
+                EXCLUDE_FILTER="$EXCLUDE_FILTER and "
+              fi
+              EXCLUDE_FILTER="$EXCLUDE_FILTER.platform != \"$exclude_platform\""
+            done
+            
+            FILTERED_PLATFORMS=$(echo "$PLATFORMS" | jq "[.[] | select($EXCLUDE_FILTER)]")
+            echo "platforms=$FILTERED_PLATFORMS" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup
+        id: setup
+        shell: bash
+        run: |
+          # Set binary name (auto-detect from repo if not provided)
+          BINARY_NAME="${{ inputs.binary-name }}"
+          if [[ -z "$BINARY_NAME" ]]; then
+            BINARY_NAME="${{ github.event.repository.name }}"
+          fi
+          
+          echo "binary-name=$BINARY_NAME" >> $GITHUB_OUTPUT
+          echo "Building binary: $BINARY_NAME for ${{ matrix.platform }}"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -181,180 +139,95 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Setup cross-compilation
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           case "${{ matrix.target }}" in
             aarch64-unknown-linux-gnu)
-              sudo apt-get update
-              sudo apt-get install -y gcc-aarch64-linux-gnu
+              sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
               echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
               ;;
             x86_64-unknown-linux-musl)
-              sudo apt-get update
-              sudo apt-get install -y musl-tools
+              sudo apt-get update && sudo apt-get install -y musl-tools
               ;;
             aarch64-unknown-linux-musl)
-              sudo apt-get update
-              sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+              sudo apt-get update && sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
               echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
               ;;
           esac
 
-      - name: Cache cargo registry
+      - name: Cache cargo
         uses: actions/cache@v4
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-registry-
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
 
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-index-
-
-      - name: Cache target directory
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-${{ matrix.target }}-target-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-target-
-
-      - name: Build binaries
+      - name: Build binary
         shell: bash
         run: |
-          # Get binary name from validation
-          BINARY_NAME="${{ needs.validate-inputs.outputs.binary-name }}"
+          BINARY_NAME="${{ steps.setup.outputs.binary-name }}"
           
-          # Create release directory
-          mkdir -p release
+          # Build binary (let cargo handle validation and errors)
+          cargo build --bin "$BINARY_NAME" --target ${{ matrix.target }} ${{ inputs.cargo-args }}
           
-          echo "Building binary: $BINARY_NAME for target: ${{ matrix.target }}"
-            
-          # Check if binary exists in Cargo.toml
-          if ! cargo metadata --format-version 1 | jq -e --arg bin "$BINARY_NAME" '.packages[].targets[] | select(.name == $bin and (.kind[] | contains("bin")))' > /dev/null; then
-            echo "Error: Binary '$BINARY_NAME' not found in Cargo.toml"
-            echo "Available binaries:"
-            cargo metadata --format-version 1 | jq -r '.packages[].targets[] | select(.kind[] | contains("bin")) | .name' || echo "Could not list binaries"
-            exit 1
-          fi
-          
-          if ! cargo build --bin "$BINARY_NAME" --target ${{ matrix.target }} ${{ inputs.cargo-args }}; then
-            echo "Error: Failed to build binary '$BINARY_NAME' for target '${{ matrix.target }}'"
-            echo "Cargo args: ${{ inputs.cargo-args }}"
-            exit 1
-          fi
-          
-          echo "Successfully built binary: $BINARY_NAME"
-            
           # Determine binary extension
           BINARY_EXT=""
           if [[ "${{ matrix.target }}" == *"windows"* ]]; then
             BINARY_EXT=".exe"
           fi
           
-          SOURCE_BINARY="target/${{ matrix.target }}/release/${BINARY_NAME}${BINARY_EXT}"
-          TARGET_BINARY="release/${BINARY_NAME}-${{ matrix.platform }}${BINARY_EXT}"
-            
-          # Copy binary to release directory with better error handling
-          if [[ ! -f "$SOURCE_BINARY" ]]; then
-            echo "Error: Binary not found: $SOURCE_BINARY"
-            echo "Expected binary location: $SOURCE_BINARY"
-            echo "Available files in target directory:"
-            find "target/${{ matrix.target }}/release" -type f -executable 2>/dev/null || echo "Target directory not found or no executable files"
-            exit 1
-          fi
+          # Copy to release directory
+          mkdir -p release
+          SOURCE="target/${{ matrix.target }}/release/${BINARY_NAME}${BINARY_EXT}"
+          TARGET="release/${BINARY_NAME}-${{ matrix.platform }}${BINARY_EXT}"
           
-          if ! cp "$SOURCE_BINARY" "$TARGET_BINARY"; then
-            echo "Error: Failed to copy binary from $SOURCE_BINARY to $TARGET_BINARY"
-            exit 1
-          fi
+          cp "$SOURCE" "$TARGET"
           
-          # Set executable permissions for non-Windows
+          # Set executable permissions (Unix)
           if [[ "${{ matrix.target }}" != *"windows"* ]]; then
-            if ! chmod +x "$TARGET_BINARY"; then
-              echo "Error: Failed to set executable permissions on $TARGET_BINARY"
-              exit 1
-            fi
+            chmod +x "$TARGET"
           fi
           
-          # Verify the binary was created successfully
-          if [[ ! -f "$TARGET_BINARY" ]]; then
-            echo "Error: Target binary was not created: $TARGET_BINARY"
-            exit 1
-          fi
-          
-          echo "Successfully built and copied: $TARGET_BINARY"
+          echo "Built: $TARGET"
 
-      - name: Create archives
+      - name: Create archive
         if: inputs.create-archives
         shell: bash
         run: |
-          BINARY_NAME="${{ needs.validate-inputs.outputs.binary-name }}"
-          
-          # Get variables to avoid GitHub Actions expressions in heredoc
+          BINARY_NAME="${{ steps.setup.outputs.binary-name }}"
           PLATFORM="${{ matrix.platform }}"
-          TARGET="${{ matrix.target }}"
-          RELEASE_TAG="${{ inputs.release-tag }}"
+          TAG="${{ inputs.release-tag }}"
           
-          # Determine binary extension and archive format
+          # Determine file extensions
           BINARY_EXT=""
           ARCHIVE_EXT="tar.gz"
-          if [[ "$TARGET" == *"windows"* ]]; then
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
             BINARY_EXT=".exe"
             ARCHIVE_EXT="zip"
           fi
           
           BINARY_FILE="${BINARY_NAME}-${PLATFORM}${BINARY_EXT}"
-          ARCHIVE_NAME="${BINARY_NAME}-${RELEASE_TAG}-${PLATFORM}"
-            
-          if [[ -f "release/$BINARY_FILE" ]]; then
-            # Create temporary directory for archive contents
-            mkdir -p "temp-archive/$ARCHIVE_NAME"
-            cp "release/$BINARY_FILE" "temp-archive/$ARCHIVE_NAME/"
-            
-            # Add README to archive
-            cat > "temp-archive/$ARCHIVE_NAME/README.md" << EOF
-# ${BINARY_NAME} ${RELEASE_TAG}
-
-This archive contains the ${BINARY_NAME} binary for ${PLATFORM}.
-
-## Installation
-
-Extract the binary and place it in your PATH.
-
-For Unix-like systems:
-\`\`\`bash
-chmod +x ${BINARY_FILE}
-sudo mv ${BINARY_FILE} /usr/local/bin/${BINARY_NAME}
-\`\`\`
-
-## Platform Information
-- Platform: ${PLATFORM}
-- Target: ${TARGET}
-- Version: ${RELEASE_TAG}
-
-Built with rust-release GitHub Action
-EOF
-              
-            # Create archive
-            cd temp-archive
-            if [[ "$ARCHIVE_EXT" == "zip" ]]; then
-              zip -r "../release/${ARCHIVE_NAME}.zip" "$ARCHIVE_NAME"
-            else
-              tar -czf "../release/${ARCHIVE_NAME}.tar.gz" "$ARCHIVE_NAME"
-            fi
-            cd ..
-            
-            # Clean up
-            rm -rf temp-archive
-            
-            echo "Created archive: release/${ARCHIVE_NAME}.${ARCHIVE_EXT}"
+          ARCHIVE_NAME="${BINARY_NAME}-${TAG}-${PLATFORM}"
+          
+          # Create archive with binary
+          mkdir -p "temp/$ARCHIVE_NAME"
+          cp "release/$BINARY_FILE" "temp/$ARCHIVE_NAME/"
+          
+          cd temp
+          if [[ "$ARCHIVE_EXT" == "zip" ]]; then
+            zip -r "../release/${ARCHIVE_NAME}.zip" "$ARCHIVE_NAME"
+          else
+            tar -czf "../release/${ARCHIVE_NAME}.tar.gz" "$ARCHIVE_NAME"
           fi
+          cd ..
+          rm -rf temp
+          
+          echo "Created: ${ARCHIVE_NAME}.${ARCHIVE_EXT}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -363,15 +236,17 @@ EOF
           path: release/
           retention-days: 1
 
-  create-release:
-    name: Create Release
-    needs: [validate-inputs, build]
+  release:
+    name: Create GitHub Release
+    needs: build
     runs-on: ubuntu-latest
+    outputs:
+      release-id: ${{ steps.create-release.outputs.id }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -380,23 +255,9 @@ EOF
         shell: bash
         run: |
           mkdir -p release-assets
+          find artifacts -type f -exec cp {} release-assets/ \;
           
-          # Collect all binaries and archives with error handling
-          if ! find artifacts -type f -exec cp {} release-assets/ \;; then
-            echo "Error: Failed to copy artifacts to release-assets"
-            exit 1
-          fi
-          
-          # Verify we have assets to release
-          ASSET_COUNT=$(find release-assets -type f | wc -l)
-          if [[ "$ASSET_COUNT" -eq 0 ]]; then
-            echo "Error: No release assets found"
-            echo "Artifacts directory contents:"
-            find artifacts -type f || echo "No artifacts found"
-            exit 1
-          fi
-          
-          echo "Found $ASSET_COUNT release assets:"
+          echo "Release assets:"
           ls -la release-assets/
 
       - name: Generate checksums
@@ -405,38 +266,17 @@ EOF
         run: |
           cd release-assets
           
-          # Verify we have files to checksum
-          if [[ ! -f * ]]; then
-            echo "Error: No files found to generate checksums for"
-            exit 1
-          fi
-          
-          # Generate SHA256 checksums with error handling
           if command -v sha256sum >/dev/null; then
-            if ! sha256sum * > checksums.txt; then
-              echo "Error: Failed to generate checksums with sha256sum"
-              exit 1
-            fi
-          elif command -v shasum >/dev/null; then
-            if ! shasum -a 256 * > checksums.txt; then
-              echo "Error: Failed to generate checksums with shasum"
-              exit 1
-            fi
+            sha256sum * > checksums.txt
           else
-            echo "Error: No SHA256 utility available (sha256sum or shasum)"
-            exit 1
-          fi
-          
-          # Verify checksums file was created
-          if [[ ! -f checksums.txt || ! -s checksums.txt ]]; then
-            echo "Error: Checksums file was not created or is empty"
-            exit 1
+            shasum -a 256 * > checksums.txt
           fi
           
           echo "Generated checksums:"
           cat checksums.txt
 
       - name: Create GitHub Release
+        id: create-release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ inputs.release-tag }}
@@ -447,3 +287,145 @@ EOF
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  npm-publish:
+    name: Publish to npm
+    if: inputs.enable-npm
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate npm inputs
+        shell: bash
+        run: |
+          if [[ -z "${{ inputs.npm-package-name }}" ]]; then
+            echo "Error: npm-package-name is required when enable-npm=true"
+            exit 1
+          fi
+          
+          if [[ -z "${{ secrets.NPM_TOKEN }}" ]]; then
+            echo "Error: NPM_TOKEN secret is required for npm publishing"
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download release assets
+        shell: bash
+        run: |
+          # Download binaries from GitHub release
+          gh release download ${{ inputs.release-tag }} --dir binaries
+          
+          echo "Downloaded binaries:"
+          ls -la binaries/
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create npm package
+        shell: bash
+        run: |
+          BINARY_NAME="${{ needs.build.outputs.binary-name }}"
+          PACKAGE_NAME="${{ inputs.npm-package-name }}"
+          VERSION="${{ inputs.release-tag }}"
+          
+          # Remove 'v' prefix from version if present
+          VERSION=${VERSION#v}
+          
+          # Create package structure
+          mkdir -p npm-package/bin
+          
+          # Copy binaries and create wrapper scripts
+          for platform in linux-x86_64 linux-arm64 mac-x86_64 mac-arm64 windows-x86_64; do
+            if [[ "$platform" == "windows-x86_64" ]]; then
+              BINARY_FILE="${BINARY_NAME}-${platform}.exe"
+              if [[ -f "binaries/$BINARY_FILE" ]]; then
+                cp "binaries/$BINARY_FILE" "npm-package/bin/"
+              fi
+            else
+              BINARY_FILE="${BINARY_NAME}-${platform}"
+              if [[ -f "binaries/$BINARY_FILE" ]]; then
+                cp "binaries/$BINARY_FILE" "npm-package/bin/"
+              fi
+            fi
+          done
+          
+          # Create wrapper script
+          cat > npm-package/bin/${PACKAGE_NAME} << 'EOF'
+          #!/usr/bin/env node
+          const { spawn } = require('child_process');
+          const path = require('path');
+          const os = require('os');
+          
+          function getBinaryName() {
+            const platform = os.platform();
+            const arch = os.arch();
+            
+            let platformName;
+            if (platform === 'linux') {
+              platformName = arch === 'arm64' ? 'linux-arm64' : 'linux-x86_64';
+            } else if (platform === 'darwin') {
+              platformName = arch === 'arm64' ? 'mac-arm64' : 'mac-x86_64';
+            } else if (platform === 'win32') {
+              platformName = 'windows-x86_64';
+              return `BINARY_NAME-${platformName}.exe`;
+            } else {
+              throw new Error(`Unsupported platform: ${platform}`);
+            }
+            
+            return `BINARY_NAME-${platformName}`;
+          }
+          
+          const binaryName = getBinaryName();
+          const binaryPath = path.join(__dirname, binaryName);
+          
+          const child = spawn(binaryPath, process.argv.slice(2), { stdio: 'inherit' });
+          child.on('exit', (code) => process.exit(code));
+          EOF
+          
+          # Replace placeholder in wrapper
+          sed -i.bak "s/BINARY_NAME/${BINARY_NAME}/g" npm-package/bin/${PACKAGE_NAME}
+          rm npm-package/bin/${PACKAGE_NAME}.bak
+          
+          chmod +x npm-package/bin/${PACKAGE_NAME}
+          
+          # Create package.json
+          cat > npm-package/package.json << EOF
+          {
+            "name": "${PACKAGE_NAME}",
+            "version": "${VERSION}",
+            "description": "${{ inputs.npm-description || format('Command line tool for {0}', needs.build.outputs.binary-name) }}",
+            "bin": {
+              "${PACKAGE_NAME}": "./bin/${PACKAGE_NAME}"
+            },
+            "files": ["bin/"],
+            "keywords": ["cli", "tool", "rust", "binary"],
+            "author": "${{ github.repository_owner }}",
+            "license": "MIT",
+            "homepage": "${{ github.server_url }}/${{ github.repository }}",
+            "repository": {
+              "type": "git",
+              "url": "${{ github.server_url }}/${{ github.repository }}.git"
+            },
+            "bugs": {
+              "url": "${{ github.server_url }}/${{ github.repository }}/issues"
+            }
+          }
+          EOF
+
+      - name: Publish to npm
+        shell: bash
+        run: |
+          cd npm-package
+          
+          # Publish with specified dist-tag
+          npm publish --tag ${{ inputs.npm-dist-tag }}
+          
+          echo "Published ${{ inputs.npm-package-name }}@$(cat package.json | jq -r .version) with tag: ${{ inputs.npm-dist-tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

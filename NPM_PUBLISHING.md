@@ -1,10 +1,31 @@
 # 📦 npm Publishing Strategy Guide
 
-A comprehensive guide for safely publishing Rust binaries to npm registry using the rust-release action.
+A comprehensive guide for safely publishing Rust binaries to npm registry using the unified rust-release workflow.
 
 ## 🎯 Overview
 
-This guide covers how to extend the rust-release workflow to publish your Rust binaries as npm packages, with special focus on **unpublish policies** and **safe deployment strategies**.
+This guide covers how to use the unified rust-release workflow to publish your Rust binaries as npm packages, with special focus on **unpublish policies** and **safe deployment strategies**.
+
+## 🚀 Quick Start with Unified Workflow
+
+```yaml
+name: Release with npm
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
+    with:
+      release-tag: ${{ github.ref_name }}
+      enable-npm: true
+      npm-package-name: 'my-cli'
+      npm-dist-tag: 'beta'  # Safe deployment strategy
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
 
 ## ⚠️ npm Unpublish Policy
 
@@ -74,8 +95,8 @@ graph LR
 **Implementation:**
 ```yaml
 # Always publish to beta first
-source_tag: ${{ github.ref_name }}
-npm_dist_tag: 'beta'
+enable-npm: true
+npm-dist-tag: 'beta'
 ```
 
 **Promotion Process:**
@@ -124,13 +145,13 @@ jobs:
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  npm-publish:
-    needs: rust-release
-    uses: xctions/rust-release/.github/workflows/npm-publish.yml@v2
+  release:
+    uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
     with:
-      source_tag: ${{ github.ref_name }}
-      npm_dist_tag: 'beta'  # Safe deployment
-      package_name: 'my-cli'
+      release-tag: ${{ github.ref_name }}
+      enable-npm: true
+      npm-dist-tag: 'beta'  # Safe deployment
+      npm-package-name: 'my-cli'
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```
@@ -138,17 +159,17 @@ jobs:
 ### Advanced Conditional Publishing
 
 ```yaml
-npm-publish:
-  needs: rust-release
-  uses: xctions/rust-release/.github/workflows/npm-publish.yml@v2
+release:
+  uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
   with:
-    source_tag: ${{ github.ref_name }}
-    npm_dist_tag: ${{ 
+    release-tag: ${{ github.ref_name }}
+    enable-npm: true
+    npm-dist-tag: ${{ 
       github.ref_name == 'stable' && 'latest' || 
       contains(github.ref_name, 'alpha') && 'alpha' ||
       'beta' 
     }}
-    package_name: 'my-cli'
+    npm-package-name: 'my-cli'
   secrets:
     NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```
