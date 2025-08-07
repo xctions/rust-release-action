@@ -31,3 +31,15 @@ build/
 .env
 .env.local
 .env.*.local
+
+# Test results and logs
+test/results/
+*.log
+*.html
+
+# act configuration
+.actrc
+
+# npm package testing
+npm-package/
+node_modules/

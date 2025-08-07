@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=validate-inputs.sh
 source "$SCRIPT_DIR/validate-inputs.sh"
 
-# Default supported platforms matrix
+# Default supported platforms matrix - simplified to 3 platforms
 DEFAULT_MATRIX='[
   {
     "target": "x86_64-unknown-linux-gnu",
@@ -28,32 +28,11 @@ DEFAULT_MATRIX='[
     "binary_ext": ""
   },
   {
-    "target": "x86_64-apple-darwin",
-    "os": "macos-12",
-    "platform": "mac-x86_64",
-    "archive_ext": "tar.gz",
-    "binary_ext": ""
-  },
-  {
     "target": "aarch64-apple-darwin",
     "os": "macos-latest",
     "platform": "mac-arm64",
     "archive_ext": "tar.gz",
     "binary_ext": ""
-  },
-  {
-    "target": "x86_64-pc-windows-msvc",
-    "os": "windows-latest",
-    "platform": "windows-x86_64",
-    "archive_ext": "zip",
-    "binary_ext": ".exe"
-  },
-  {
-    "target": "aarch64-pc-windows-msvc",
-    "os": "windows-latest",
-    "platform": "windows-arm64",
-    "archive_ext": "zip",
-    "binary_ext": ".exe"
   }
 ]'
 
@@ -125,7 +104,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --exclude=platforms  Comma-separated list of platforms to exclude"
             echo "  --help, -h          Show this help message"
             echo ""
-            echo "Default platforms: linux-x86_64, linux-arm64, mac-x86_64, mac-arm64, windows-x86_64, windows-arm64"
+            echo "Default platforms: linux-x86_64, linux-arm64, mac-arm64"
             echo ""
             echo "Example:"
             echo "  $0 --exclude=windows-arm64,linux-arm64"
@@ -264,12 +243,6 @@ for ((i=0; i<MATRIX_LENGTH; i++)); do
     case "$TARGET" in
         "aarch64-unknown-linux-gnu")
             CROSS_COMPILE_FLAGS="CC=aarch64-linux-gnu-gcc"
-            ;;
-        "armv7-unknown-linux-gnueabihf")
-            CROSS_COMPILE_FLAGS="CC=arm-linux-gnueabihf-gcc"
-            ;;
-        "x86_64-pc-windows-gnu")
-            CROSS_COMPILE_FLAGS="CC=x86_64-w64-mingw32-gcc"
             ;;
     esac
     

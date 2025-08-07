@@ -1,0 +1,10 @@
+{
+  "name": "test-rust-app",
+  "version": "0.1.0",
+  "features": [
+    "cli",
+    "json",
+    "config",
+    "cross-platform"
+  ]
+}

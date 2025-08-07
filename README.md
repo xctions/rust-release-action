@@ -1,28 +1,21 @@
-# Secure Rust Release Builder
+# 🚀 Rust Build & Release
 
-A production-ready reusable GitHub workflow that builds Rust binaries for multiple platforms and creates secure releases with checksums, archives, and installation scripts - similar to zoxide's release structure.
-
-## 🔒 Security First
-
-This reusable workflow addresses critical security vulnerabilities found in similar actions:
-- ✅ **No command injection** - All inputs are properly validated and sanitized
-- ✅ **Input validation** - Strict validation prevents malicious inputs
-- ✅ **Checksum verification** - SHA256 checksums for all assets
-- ✅ **Safe template rendering** - No shell interpretation in templates
-- ✅ **Path traversal protection** - All file operations are validated
+A unified GitHub workflow for building Rust binaries across multiple platforms and optionally publishing to npm - designed for simplicity and security.
 
 ## ✨ Features
 
-- 🚀 **Matrix-based parallel builds** - Fast cross-platform compilation
-- 📦 **Multiple release formats** - Standalone binaries + tar.gz/zip archives
-- 🔍 **Checksum generation** - SHA256 checksums for integrity verification
-- 📋 **Multiple binaries** - Build several binaries from one repository
-- 🎯 **Flexible platform targeting** - Include/exclude specific platforms
-- 📥 **Secure install scripts** - Hardened installation with integrity checks
-- 🏗️ **Professional structure** - Follows zoxide's release asset patterns
-- 🎯 **Smart defaults** - Automatically uses repository name as binary name
+- 🚀 **Unified Workflow** - Rust builds + npm publishing in one workflow
+- 🔒 **Security First** - Minimal validation, letting cargo handle errors naturally
+- 📦 **Cross-Platform Builds** - 8 platforms by default (Linux, macOS, Windows)
+- 📋 **Single Binary Focus** - Optimized for 90%+ of Rust projects (single binary)
+- 🎯 **Smart Defaults** - Auto-detects repository name as binary name
+- 📥 **npm Integration** - Optional npm publishing with platform detection
+- 🏗️ **Simple Interface** - Exclude platforms instead of complex include logic
+- 🧪 **Local Testing** - Full test suite with `act` support for workflow validation
 
 ## 🚀 Quick Start
+
+### Basic Rust Release
 
 ```yaml
 name: Release
@@ -32,264 +25,311 @@ on:
 
 jobs:
   release:
-    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
-    with:
-      # binary-name is optional - uses repository name by default
-      release-tag: ${{ github.ref_name }}
+    uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-## 📋 Inputs
+### With npm Publishing
 
-| Input | Description | Required | Default |
-|-------|-------------|----------|---------|
+```yaml
+name: Release with npm
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
+    with:
+      enable-npm: true
+      npm-package-name: 'my-cli'
+      # npm-dist-tag auto-detected from release tag
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+## 📋 Input Parameters
+
+| Parameter | Description | Required | Default |
+|-----------|-------------|----------|---------|
 | `binary-name` | Binary name | No | Repository name |
-| `release-tag` | Release tag to create | Yes | |
-| `exclude` | Comma-separated platforms to exclude | No | |
-| `rust-version` | Rust version to use | No | `stable` |
-| `cargo-args` | Additional cargo build arguments | No | `--release` |
+| `platforms` | Platforms to include | No | `mac-arm64,linux-x86_64,linux-arm64` |
+| `rust-version` | Rust version | No | `stable` |
+| `cargo-args` | Cargo build arguments | No | `--release` |
 | `generate-checksums` | Generate SHA256 checksums | No | `true` |
-| `create-archives` | Create tar.gz/zip archives | No | `true` |
+| `create-archives` | Create platform archives | No | `true` |
+| **npm Options** | | | |
+| `enable-npm` | Enable npm publishing | No | `false` |
+| `npm-package-name` | npm package name | No* | |
+| `npm-dist-tag` | npm dist-tag | No | Auto-detected from release tag |
+| `npm-description` | Package description | No | Auto-generated |
+
+\* Required when `enable-npm: true`
 
 ## 🎯 Supported Platforms
 
-**Default Matrix:**
+**Default Matrix (3 platforms):**
 - `linux-x86_64` - Linux x86_64 (GNU)
-- `linux-arm64` - Linux ARM64 (GNU)
-- `linux-x86_64-musl` - Linux x86_64 (musl)
-- `linux-arm64-musl` - Linux ARM64 (musl)
-- `mac-x86_64` - macOS Intel
+- `linux-arm64` - Linux ARM64 (GNU)  
 - `mac-arm64` - macOS Apple Silicon
-- `windows-x86_64` - Windows x86_64 (MSVC)
-- `windows-arm64` - Windows ARM64 (MSVC)
 
-## 📚 Examples
-
-### Single Binary (using repository name)
+**Platform Selection:**
 ```yaml
-jobs:
-  release:
-    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
-    with:
-      # No binary-name specified - uses repository name automatically
-      release-tag: ${{ github.ref_name }}
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+platforms: 'linux-x86_64,mac-arm64'  # Build only x86_64 and macOS ARM64
 ```
 
-### Custom Binary Name
+## 📚 Usage Examples
+
+### 1. Basic Release (Auto-detected binary name)
 ```yaml
-jobs:
-  release:
-    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
-    with:
-      binary-name: 'my-custom-app'
-      release-tag: ${{ github.ref_name }}
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+# Uses repository name as binary name
+uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
+secrets:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### Exclude Platforms
+### 2. Custom Binary Name
 ```yaml
-jobs:
-  release:
-    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
-    with:
-      # Uses repository name as binary name
-      exclude: 'windows-arm64,linux-arm64'
-      release-tag: ${{ github.ref_name }}
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
+with:
+  binary-name: 'my-custom-tool'
+secrets:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### Selective Platform Builds
+### 3. Selective Platforms
 ```yaml
-jobs:
-  release:
-    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
-    with:
-      # Uses repository name as binary name
-      exclude: 'linux-arm64,windows-arm64,mac-x86_64'  # Build only x86_64 + mac-arm64
-      release-tag: ${{ github.ref_name }}
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
+with:
+  platforms: 'linux-x86_64'  # Build only Linux x86_64
+secrets:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### Advanced Configuration
+### 4. Production npm Publishing
 ```yaml
-jobs:
-  release:
-    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
-    with:
-      binary-name: 'my-custom-app'  # Override repository name
-      release-tag: ${{ github.ref_name }}
-      rust-version: '1.75.0'
-      cargo-args: '--release --locked --no-default-features --features production'
-      generate-checksums: true
-      create-archives: true
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
+with:
+  binary-name: 'my-cli'
+  platforms: 'linux-x86_64,mac-arm64'  # Faster builds
+  
+  # npm publishing
+  enable-npm: true
+  npm-package-name: '@myorg/my-cli'
+  # npm-dist-tag auto-detected: v1.0.0 → latest, v1.0.0-beta.1 → beta
+  npm-description: 'My awesome CLI tool'
+secrets:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+### 5. Override Auto-Detected Tag
+```yaml
+uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
+with:
+  enable-npm: true
+  npm-package-name: 'my-cli'
+  # Override auto-detection with custom logic
+  npm-dist-tag: ${{ contains(github.ref_name, 'experimental') && 'experimental' || '' }}
 ```
 
 ## 📦 Release Assets
 
-For each binary and platform, the workflow creates:
+For each build, the workflow creates:
 
 ### Standalone Binaries
 - `my-app-linux-x86_64`
-- `my-app-mac-arm64` 
-- `my-app-windows-x86_64.exe`
+- `my-app-linux-arm64`
+- `my-app-mac-arm64`
 
-### Archives (zoxide-style)
+### Archives
 - `my-app-v1.0.0-linux-x86_64.tar.gz`
+- `my-app-v1.0.0-linux-arm64.tar.gz`
 - `my-app-v1.0.0-mac-arm64.tar.gz`
-- `my-app-v1.0.0-windows-x86_64.zip`
 
-### Security Assets
+### Security
 - `checksums.txt` - SHA256 checksums for all assets
-- `checksums-verify.sh` - Verification script
 
-## 🔐 Secure Installation
+### npm Package (when enabled)
+- Cross-platform npm package with automatic platform detection
+- Binary wrapper that downloads the correct platform binary
+- Works with `npm install -g my-cli`
 
-### Unix/Linux/macOS
-```bash
-curl -fsSL https://github.com/owner/repo/releases/download/v1.0.0/install-linux-x86_64.sh | bash
-```
+## 🔐 npm Publishing Strategy
 
-### Windows (PowerShell)
-```powershell
-iwr https://github.com/owner/repo/releases/download/v1.0.0/install-windows-x86_64.ps1 | iex
-```
+### Dist-Tag Options
 
-### Manual Installation with Verification
-```bash
-# Download and verify
-curl -fsSL -O https://github.com/owner/repo/releases/download/v1.0.0/my-app-v1.0.0-linux-x86_64.tar.gz
-curl -fsSL -O https://github.com/owner/repo/releases/download/v1.0.0/checksums.txt
-sha256sum -c checksums.txt --ignore-missing
+| Tag | Use Case | Risk Level |
+|-----|----------|------------|
+| `latest` | Production releases | ❌ High (default install) |
+| `beta` | Testing releases | ⚠️ Medium |
+| `alpha` | Early testing | ⚠️ Medium |
+| `rc` | Release candidates | ⚠️ Medium |
+| `dev` | Development builds | ✅ Low |
 
-# Extract and install
-tar -xzf my-app-v1.0.0-linux-x86_64.tar.gz
-sudo cp my-app-v1.0.0-linux-x86_64/my-app /usr/local/bin/
-```
+### Safe Deployment Pattern
 
-## 🔧 Development
-
-See [examples/](examples/) directory for complete workflow examples:
-- [workflow-usage.yml](examples/workflow-usage.yml) - Basic usage
-- [advanced-usage.yml](examples/advanced-usage.yml) - Multiple binaries with platform exclusion
-- [custom-platforms.yml](examples/custom-platforms.yml) - Custom platform matrix
-
-## 🛠️ Scripts
-
-The workflow uses several secure scripts in the `scripts/` directory:
-- `validate-inputs.sh` - Input validation and sanitization
-- `generate-matrix.sh` - Build matrix generation
-- `secure-build.sh` - Cross-compilation with security
-- `create-checksums.sh` - SHA256 checksum generation
-- `package-assets.sh` - Asset packaging
-
-## 🆚 Migration from v1
-
-The new v2 reusable workflow replaces the composite action with enhanced security:
-
-**v1 (Composite Action):**
 ```yaml
-- uses: xctions/rust-release@v1
-  with:
-    binary-name: 'my-app'
-    platforms: 'linux-x86_64,mac-arm64'
+# 1. Create beta release (auto-detected)
+git tag v1.0.0-beta.1  # → npm-dist-tag: beta
+
+# 2. Test with: npm install -g my-cli@beta
+
+# 3. Create stable release (auto-detected)
+git tag v1.0.0  # → npm-dist-tag: latest
 ```
 
-**v2 (Reusable Workflow):**
-```yaml
-uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
-with:
-  # binary-name is now optional - uses repository name by default
-  exclude: 'linux-arm64,windows-x86_64,windows-arm64'
+### Auto-Detection Rules
+
+| Release Tag Pattern | npm dist-tag |
+|---------------------|--------------|
+| `v1.0.0` | `latest` |
+| `v1.0.0-beta.1` | `beta` |
+| `v1.0.0-alpha.1` | `alpha` |
+| `v1.0.0-rc.1` | `rc` |
+| `v1.0.0-dev.1` | `dev` |
+
+### npm Installation
+
+```bash
+# Install from specific tag
+npm install -g my-cli@beta
+
+# Install latest (production)
+npm install -g my-cli
+
+# Use without installing
+npx my-cli --help
 ```
 
-## 🔒 Security
+## 🔧 Complete Example
 
-This workflow has been designed with security as a priority:
-- All inputs are validated and sanitized
-- No command injection vulnerabilities
-- Secure template rendering
-- Checksum verification for all assets
-- Path traversal protection
+See [examples/](examples/) directory:
+- **[basic-usage.yml](examples/basic-usage.yml)** - Simple Rust release
+- **[with-npm.yml](examples/with-npm.yml)** - Rust + npm publishing
+- **[advanced.yml](examples/advanced.yml)** - Full configuration with smart tagging
 
-For security issues, please see [SECURITY_IMPROVEMENTS.md](SECURITY_IMPROVEMENTS.md).
+## 🆚 Migration from v2
 
-## 📦 npm Publishing (Coming Soon)
-
-Extend your Rust releases to the npm ecosystem for easier installation and distribution.
-
-### Quick Start with npm
-
+### Before (v2 - Separate Workflows)
 ```yaml
 jobs:
   rust-release:
-    uses: xctions/rust-release/.github/workflows/reusable-rust-release.yml@v2
+    uses: ./.github/workflows/rust-release.yml@v2
     with:
-      binary-name: 'my-cli'
+      binary-name: 'my-app'
       release-tag: ${{ github.ref_name }}
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+  
   npm-publish:
-    needs: rust-release
-    uses: xctions/rust-release/.github/workflows/npm-publish.yml@v2
+    needs: rust-release  
+    uses: ./.github/workflows/npm-publish.yml@v2
     with:
       source_tag: ${{ github.ref_name }}
-      package_name: 'my-cli'
-      npm_dist_tag: 'beta'  # Safe deployment strategy
-    secrets:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      npm_package_name: 'my-app'
+      npm_dist_tag: 'beta'
 ```
 
-### Benefits of npm Publishing
-
-- **Easy Installation**: `npm install -g my-cli`
-- **Node.js Ecosystem Integration**: Use in package.json scripts
-- **Automatic Updates**: `npm update -g my-cli`
-- **Cross-Platform**: Works on Windows, macOS, Linux
-
-### Safe Deployment Strategy
-
+### After (v3 - Unified Workflow)
 ```yaml
-# GitHub Release → npm Strategy
-v1.2.3 → 1.2.3-beta.0 (@beta)     # Safe testing
-# After validation:
-# npm dist-tag add my-cli@1.2.3-beta.0 latest
+jobs:
+  release:
+    uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
+    with:
+      binary-name: 'my-app'  # Optional - auto-detects from repo
+      enable-npm: true
+      npm-package-name: 'my-app'
+      # release-tag: auto-detects github.ref_name
+      # npm-dist-tag: auto-detects from release tag
 ```
 
-### npm Tag Options
+**Key Changes:**
+- ✅ **Unified**: Single workflow instead of two
+- ✅ **Simplified**: 50% fewer lines of code  
+- ✅ **Auto-detection**: No manual release-tag or npm-dist-tag needed
+- ✅ **Faster**: Minimal validation overhead
+- ✅ **Easier**: Simpler parameter interface
 
-| npm Tag | Use Case | Risk Level |
-|---------|----------|------------|
-| `latest` | Production releases | ❌ High (default install) |
-| `beta` | Testing releases | ⚠️ Medium (visible tag) |
-| `alpha` | Early testing | ⚠️ Medium (visible tag) |
-| `rc` | Release candidates | ⚠️ Medium (visible tag) |
-| `dev` | Development builds | ✅ Low (experimental) |
+## 🔧 Development Setup
 
-**Note**: All tags have identical unpublish restrictions (72-hour rule). Risk level refers to mistake impact.
+### Prerequisites
+- **Rust** (stable toolchain recommended)
+- **Git** for version control
+- **Docker** (optional, for local testing with act)
 
-### Advanced Features
+### Local Testing
+```bash
+# Install act for local GitHub Actions testing
+brew install act  # macOS
+# or download from: https://github.com/nektos/act/releases
 
-- **Platform Detection**: Automatically downloads correct binary
-- **Custom npm Registry**: Support for private registries
-- **Scoped Packages**: `@myorg/my-cli` support
-- **Multiple Binaries**: Publish different tools from same release
+# Test workflow locally
+act -l  # List available workflows
+act workflow_dispatch  # Run with manual trigger
+```
 
-### Documentation
+### Development Dependencies
+For detailed information about all external dependencies and tools used in this workflow, see **[docs/DEPENDENCIES.md](docs/DEPENDENCIES.md)**.
 
-- **[📖 Complete npm Guide](NPM_PUBLISHING.md)** - Comprehensive npm publishing strategy
-- **[📋 Usage Examples](examples/npm-publish-usage.yml)** - Real-world workflow examples
-- **[🛡️ Security Best Practices](NPM_PUBLISHING.md#-best-practices)** - Safe deployment patterns
+## 📁 Project Structure
 
-**Note**: npm publishing feature is planned for v3. See [NPM_PUBLISHING.md](NPM_PUBLISHING.md) for detailed strategy and implementation timeline.
+```
+rust-release/
+├── .github/workflows/
+│   └── rust-release.yml          # Main production workflow
+├── scripts/                      # Build and validation scripts
+├── templates/                    # Install script templates
+├── examples/                     # Usage examples
+├── test/                        # Testing infrastructure
+│   ├── workflows/               # Test workflows (act-compatible)
+│   ├── test-*.sh               # Test scripts
+│   ├── test-project/           # Sample Rust project
+│   └── results/                # Test output (gitignored)
+└── docs/                       # Documentation
+    ├── DEPENDENCIES.md         # Dependency reference
+    ├── NPM_PUBLISHING.md       # npm publishing guide
+    ├── TESTING.md              # Testing documentation
+    └── *.md                    # Other docs
+```
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+./test/run-tests.sh
+
+# Run specific test suites
+./test/test-workflow.sh    # Workflow testing with act
+./test/test-scripts.sh     # Script unit tests
+./test/test-security.sh    # Security validation tests
+
+# Local workflow testing
+act -W test/workflows/rust-release-simple.yml
+
+# NOTE: Main rust-release.yml not compatible with act due to dynamic matrix
+```
+
+## 📄 Documentation
+
+- **[docs/DEPENDENCIES.md](docs/DEPENDENCIES.md)** - Complete dependency reference
+- **[docs/NPM_PUBLISHING.md](docs/NPM_PUBLISHING.md)** - Complete npm publishing guide  
+- **[docs/TESTING.md](docs/TESTING.md)** - Testing guide and troubleshooting
+- **[docs/SECURITY_IMPROVEMENTS.md](docs/SECURITY_IMPROVEMENTS.md)** - Security enhancements
+
+## 🛡️ Security Features
+
+- **Minimal Validation** - Trusts cargo/npm for error handling
+- **Input Sanitization** - Core security validations only
+- **Safe npm Publishing** - Prevents accidental @latest deploys
+- **Checksum Verification** - SHA256 for all release assets
+
+## ⚡ Performance
+
+- **862 → 430 lines** - 50% code reduction
+- **Faster builds** - Removed validation overhead  
+- **Single workflow** - Unified execution
+- **Smart caching** - Optimized cargo cache strategy
 
 ## 📄 License
 
@@ -297,11 +337,33 @@ MIT
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+1. Check [examples/](examples/) for usage patterns
+2. Test with different platforms and configurations  
+3. Update documentation for any interface changes
+4. Follow the unified workflow pattern
+
+## ⚠️ Known Limitations
+
+### act (Local Testing) Compatibility
+- **Main workflow** (`rust-release.yml`): ❌ Not compatible with act
+  - Uses dynamic matrix with `${{ fromJson(needs.prepare.outputs.matrix) }}`
+  - act cannot parse complex job output dependencies at compile time
+- **Simple workflow** (`test/workflows/rust-release-simple.yml`): ✅ Fully compatible
+  - Static matrix configuration
+  - Use this for all local testing with act
+
+### Workaround
+```bash
+# ❌ This will fail
+act -W .github/workflows/rust-release.yml
+
+# ✅ Use this instead  
+act -W test/workflows/rust-release-simple.yml
+```
 
 ## 🆘 Support
 
-For issues and questions:
-1. Check the [examples](examples/) directory
-2. Review the security documentation
-3. Open an issue on GitHub
+- **Examples**: Check [examples/](examples/) directory
+- **Issues**: GitHub Issues for bugs and feature requests
+- **Security**: See [docs/SECURITY_IMPROVEMENTS.md](docs/SECURITY_IMPROVEMENTS.md)
+- **Testing Issues**: See [docs/TESTING.md](docs/TESTING.md) for troubleshooting

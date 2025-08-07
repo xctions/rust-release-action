@@ -1,0 +1,37 @@
+# Advanced configuration with platform selection and npm publishing
+# Place this file in .github/workflows/ in your Rust project
+
+name: Advanced Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
+    with:
+      binary-name: 'my-advanced-tool'
+      
+      # Select specific platforms for faster builds
+      platforms: 'linux-x86_64,mac-arm64'
+      
+      # Custom Rust configuration
+      rust-version: '1.75.0'
+      cargo-args: '--release --locked --no-default-features --features production'
+      
+      # Release options
+      generate-checksums: true
+      create-archives: true
+      
+      # npm publishing with auto-detected tag from release
+      enable-npm: true
+      npm-package-name: '@myorg/advanced-tool'
+      # npm-dist-tag auto-detected: v1.0.0-rc.1 → rc, v1.0.0-beta.1 → beta, v1.0.0 → latest
+      npm-description: 'Advanced development tool with production-ready features'
+      
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

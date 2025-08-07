@@ -1,0 +1,79 @@
+name: Simple Test Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      binary-name:
+        description: 'Binary name (defaults to repository name)'
+        required: false
+        type: string
+        default: 'test-app'
+      test-mode:
+        description: 'Test mode'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  test:
+    name: Simple Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup inputs
+        id: setup
+        shell: bash
+        run: |
+          BINARY_NAME="${{ inputs.binary-name }}"
+          if [[ -z "$BINARY_NAME" ]]; then
+            BINARY_NAME="test-app"
+          fi
+          echo "binary-name=$BINARY_NAME" >> $GITHUB_OUTPUT
+          echo "Binary name: $BINARY_NAME"
+          echo "Test mode: ${{ inputs.test-mode }}"
+      
+      - name: Test validation functions
+        shell: bash
+        run: |
+          if [[ -f "scripts/validate-inputs.sh" ]]; then
+            source scripts/validate-inputs.sh
+            
+            # Test binary name validation
+            if validate_binary_name "${{ steps.setup.outputs.binary-name }}"; then
+              echo "✅ Binary name validation passed"
+            else
+              echo "❌ Binary name validation failed"
+              exit 1
+            fi
+            
+            # Test platform validation
+            if validate_platform_name "linux-x86_64"; then
+              echo "✅ Platform validation passed"
+            else
+              echo "❌ Platform validation failed"
+              exit 1
+            fi
+            
+            # Test cargo args validation
+            if validate_cargo_args "--release"; then
+              echo "✅ Cargo args validation passed"
+            else
+              echo "❌ Cargo args validation failed"
+              exit 1
+            fi
+            
+            echo "✅ All validation tests passed"
+          else
+            echo "⚠️ Validation script not found, skipping tests"
+          fi
+      
+      - name: Show environment
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "Binary name: ${{ steps.setup.outputs.binary-name }}"
+          echo "Runner OS: ${{ runner.os }}"
+          echo "Test mode: ${{ inputs.test-mode }}"
