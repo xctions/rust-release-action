@@ -13,6 +13,8 @@ Complete migration guide from separate workflows (v2) to unified workflow (v3).
 ### Interface Simplification
 - **Unified parameters** - All options in one workflow
 - **Auto-detection** - Repository name as default binary name
+- **Auto release-tag** - Uses github.ref_name automatically
+- **Auto npm-dist-tag** - Detects from release tag pattern
 - **Simple exclusion** - Comma-separated platform exclusion
 - **Optional npm** - Enable/disable with single flag
 
@@ -63,16 +65,16 @@ jobs:
 | v2 Parameter | v3 Parameter | Notes |
 |--------------|--------------|-------|
 | `binary-name` | `binary-name` | ✅ Same |
-| `release-tag` | `release-tag` | ✅ Same |
+| `release-tag` | ❌ Removed | Auto-detects github.ref_name |
 | `exclude` | `exclude` | ✅ Same |
 | `rust-version` | `rust-version` | ✅ Same |
 | `cargo-args` | `cargo-args` | ✅ Same |
 | `generate-checksums` | `generate-checksums` | ✅ Same |
 | `create-archives` | `create-archives` | ✅ Same |
 | **npm Parameters** | | |
-| `source_tag` | ❌ Removed | Auto-uses `release-tag` |
+| `source_tag` | ❌ Removed | Auto-uses github.ref_name |
 | `npm_package_name` | `npm-package-name` | ✅ Renamed (dash-case) |
-| `npm_dist_tag` | `npm-dist-tag` | ✅ Renamed (dash-case) |
+| `npm_dist_tag` | `npm-dist-tag` | ✅ Renamed + Auto-detected |
 | `package_description` | `npm-description` | ✅ Renamed |
 | ❌ N/A | `enable-npm` | ✅ New (required for npm) |
 
@@ -103,9 +105,7 @@ jobs:
 jobs:
   release:
     uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
-    with:
-      # binary-name is now optional - uses repo name by default
-      release-tag: ${{ github.ref_name }}
+    # No parameters needed - everything auto-detected!
 ```
 
 ### Example 2: With npm Publishing
@@ -138,11 +138,10 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
     with:
-      binary-name: 'my-cli'
-      release-tag: ${{ github.ref_name }}
+      binary-name: 'my-cli'  # Optional - auto-detects repo name
       enable-npm: true
       npm-package-name: 'my-cli'
-      npm-dist-tag: 'beta'
+      # npm-dist-tag auto-detected from release tag (v1.0.0-beta.1 → beta)
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -260,10 +259,11 @@ jobs:
 4. **Extensive validation** - Minimal validation approach
 
 ### Parameter Changes
+- `release-tag` → removed (auto-detects github.ref_name)
 - `npm_package_name` → `npm-package-name` (dash-case)
-- `npm_dist_tag` → `npm-dist-tag` (dash-case)  
+- `npm_dist_tag` → `npm-dist-tag` (dash-case + auto-detected)  
 - `package_description` → `npm-description` (prefix added)
-- `source_tag` → removed (auto-uses `release-tag`)
+- `source_tag` → removed (auto-uses github.ref_name)
 
 ### Workflow Structure
 - Job names changed: `rust-release` + `npm-publish` → `release`
@@ -273,10 +273,12 @@ jobs:
 
 - [ ] Update workflow reference to `@v3`
 - [ ] Combine rust-release and npm-publish jobs into single `release` job
+- [ ] Remove `release-tag` parameter (auto-detects github.ref_name)
 - [ ] Add `enable-npm: true` for npm publishing
 - [ ] Update parameter names (underscores → dashes)
-- [ ] Remove `source_tag` (auto-uses `release-tag`)
-- [ ] Test with a development release first
+- [ ] Remove `npm-dist-tag` or set to empty for auto-detection
+- [ ] Remove `source_tag` (auto-uses github.ref_name)
+- [ ] Test with a development release first (v1.0.0-dev.1)
 - [ ] Update any documentation references
 
 ## 🔄 Rollback Plan
@@ -315,6 +317,21 @@ npm-package-name: 'my-package'
 # v3 auto-detects from repository name
 # Only specify if you need a different name
 binary-name: 'custom-name'
+```
+
+**Issue: npm tag not as expected**
+```yaml
+# Check your release tag pattern:
+# v1.0.0-beta.1 → beta (auto-detected)
+# To override: 
+npm-dist-tag: 'experimental'
+```
+
+**Issue: No release tag parameter**
+```yaml
+# v3 automatically uses github.ref_name
+# No need to specify release-tag anymore
+# It's triggered by: git tag v1.0.0 && git push origin v1.0.0
 ```
 
 **Issue: Platform filtering not working**

@@ -14,12 +14,11 @@ jobs:
     with:
       # Use custom binary name and enable npm publishing
       binary-name: 'my-cli'
-      release-tag: ${{ github.ref_name }}
       
       # Enable npm publishing
       enable-npm: true
       npm-package-name: 'my-cli'
-      npm-dist-tag: 'beta'  # Safe deployment strategy
+      # npm-dist-tag auto-detected from release tag (v1.0.0-beta.1 → beta)
       npm-description: 'My awesome CLI tool built with Rust'
       
     secrets:

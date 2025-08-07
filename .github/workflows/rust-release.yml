@@ -8,11 +8,11 @@ on:
         required: false
         type: string
         default: ''
-      exclude:
-        description: 'Comma-separated platforms to exclude'
+      platforms:
+        description: 'Comma-separated platforms to include'
         required: false
         type: string
-        default: ''
+        default: 'mac-arm64,linux-x86_64,linux-arm64'
       rust-version:
         description: 'Rust version to use'
         required: false
@@ -23,10 +23,6 @@ on:
         required: false
         type: string
         default: '--release'
-      release-tag:
-        description: 'Release tag to create'
-        required: true
-        type: string
       generate-checksums:
         description: 'Generate SHA256 checksums'
         required: false
@@ -49,10 +45,10 @@ on:
         type: string
         default: ''
       npm-dist-tag:
-        description: 'npm dist-tag (latest, beta, alpha, rc, dev)'
+        description: 'npm dist-tag (auto-detected from release tag if not specified)'
         required: false
         type: string
-        default: 'latest'
+        default: ''
       npm-description:
         description: 'Package description'
         required: false
@@ -63,59 +59,77 @@ on:
         required: true
       NPM_TOKEN:
         required: false
+  workflow_dispatch:
+    inputs:
+      binary-name:
+        description: 'Binary name (defaults to repository name)'
+        required: false
+        type: string
+        default: ''
+      platforms:
+        description: 'Comma-separated platforms to include'
+        required: false
+        type: string
+        default: 'mac-arm64,linux-x86_64,linux-arm64'
+      rust-version:
+        description: 'Rust version to use'
+        required: false
+        type: string
+        default: 'stable'
+      cargo-args:
+        description: 'Additional cargo build arguments'
+        required: false
+        type: string
+        default: '--release'
+      generate-checksums:
+        description: 'Generate SHA256 checksums'
+        required: false
+        type: boolean
+        default: true
+      create-archives:
+        description: 'Create tar.gz/zip archives'
+        required: false
+        type: boolean
+        default: true
+      # npm publishing options
+      enable-npm:
+        description: 'Enable npm publishing'
+        required: false
+        type: boolean
+        default: false
+      npm-package-name:
+        description: 'npm package name (required if enable-npm=true)'
+        required: false
+        type: string
+        default: ''
+      npm-dist-tag:
+        description: 'npm dist-tag (auto-detected from release tag if not specified)'
+        required: false
+        type: string
+        default: ''
+      npm-description:
+        description: 'Package description'
+        required: false
+        type: string
+        default: ''
 
 env:
   CARGO_TERM_COLOR: always
-  # Default platform matrix - simple hardcoded list
+  # Default platform matrix - simplified to 3 supported platforms
   PLATFORMS: '[
     {"target": "x86_64-unknown-linux-gnu", "os": "ubuntu-latest", "platform": "linux-x86_64"},
     {"target": "aarch64-unknown-linux-gnu", "os": "ubuntu-latest", "platform": "linux-arm64"},
-    {"target": "x86_64-unknown-linux-musl", "os": "ubuntu-latest", "platform": "linux-x86_64-musl"},
-    {"target": "aarch64-unknown-linux-musl", "os": "ubuntu-latest", "platform": "linux-arm64-musl"},
-    {"target": "x86_64-apple-darwin", "os": "macos-12", "platform": "mac-x86_64"},
-    {"target": "aarch64-apple-darwin", "os": "macos-latest", "platform": "mac-arm64"},
-    {"target": "x86_64-pc-windows-msvc", "os": "windows-latest", "platform": "windows-x86_64"},
-    {"target": "aarch64-pc-windows-msvc", "os": "windows-latest", "platform": "windows-arm64"}
+    {"target": "aarch64-apple-darwin", "os": "macos-latest", "platform": "mac-arm64"}
   ]'
 
 jobs:
-  build:
-    name: Build (${{ matrix.platform }})
-    runs-on: ${{ matrix.os }}
+  prepare:
+    name: Prepare Build Matrix
+    runs-on: ubuntu-latest
     outputs:
+      matrix: ${{ steps.filter-platforms.outputs.platforms }}
       binary-name: ${{ steps.setup.outputs.binary-name }}
-      filtered-platforms: ${{ steps.filter-platforms.outputs.platforms }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(steps.filter-platforms.outputs.platforms) }}
-    
     steps:
-      - name: Filter platforms
-        id: filter-platforms
-        shell: bash
-        run: |
-          PLATFORMS='${{ env.PLATFORMS }}'
-          EXCLUDE_INPUT="${{ inputs.exclude }}"
-          
-          if [[ -z "$EXCLUDE_INPUT" ]]; then
-            echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
-          else
-            # Simple filtering using jq
-            EXCLUDE_FILTER=""
-            IFS=',' read -ra EXCLUDE_ARRAY <<< "$EXCLUDE_INPUT"
-            for exclude_platform in "${EXCLUDE_ARRAY[@]}"; do
-              exclude_platform=$(echo "$exclude_platform" | xargs)
-              if [[ -n "$EXCLUDE_FILTER" ]]; then
-                EXCLUDE_FILTER="$EXCLUDE_FILTER and "
-              fi
-              EXCLUDE_FILTER="$EXCLUDE_FILTER.platform != \"$exclude_platform\""
-            done
-            
-            FILTERED_PLATFORMS=$(echo "$PLATFORMS" | jq "[.[] | select($EXCLUDE_FILTER)]")
-            echo "platforms=$FILTERED_PLATFORMS" >> $GITHUB_OUTPUT
-          fi
-
       - name: Setup
         id: setup
         shell: bash
@@ -126,6 +140,51 @@ jobs:
             BINARY_NAME="${{ github.event.repository.name }}"
           fi
           
+          echo "binary-name=$BINARY_NAME" >> $GITHUB_OUTPUT
+          echo "Building binary: $BINARY_NAME"
+
+      - name: Filter platforms
+        id: filter-platforms
+        shell: bash
+        run: |
+          ALL_PLATFORMS='${{ env.PLATFORMS }}'
+          PLATFORMS_INPUT="${{ inputs.platforms }}"
+          
+          if [[ -z "$PLATFORMS_INPUT" ]]; then
+            # Use default platforms
+            echo "platforms=$ALL_PLATFORMS" >> $GITHUB_OUTPUT
+          else
+            # Filter to include only specified platforms
+            INCLUDE_FILTER=""
+            IFS=',' read -ra PLATFORM_ARRAY <<< "$PLATFORMS_INPUT"
+            for platform in "${PLATFORM_ARRAY[@]}"; do
+              platform=$(echo "$platform" | xargs)
+              if [[ -n "$INCLUDE_FILTER" ]]; then
+                INCLUDE_FILTER="$INCLUDE_FILTER or "
+              fi
+              INCLUDE_FILTER="$INCLUDE_FILTER.platform == \"$platform\""
+            done
+            
+            FILTERED_PLATFORMS=$(echo "$ALL_PLATFORMS" | jq "[.[] | select($INCLUDE_FILTER)]")
+            echo "platforms=$FILTERED_PLATFORMS" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    
+    steps:
+      - name: Setup
+        id: setup
+        shell: bash
+        run: |
+          # Use binary name from prepare job
+          BINARY_NAME="${{ needs.prepare.outputs.binary-name }}"
           echo "binary-name=$BINARY_NAME" >> $GITHUB_OUTPUT
           echo "Building binary: $BINARY_NAME for ${{ matrix.platform }}"
 
@@ -175,11 +234,8 @@ jobs:
           # Build binary (let cargo handle validation and errors)
           cargo build --bin "$BINARY_NAME" --target ${{ matrix.target }} ${{ inputs.cargo-args }}
           
-          # Determine binary extension
+          # No Windows support - all binaries are Unix executables
           BINARY_EXT=""
-          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            BINARY_EXT=".exe"
-          fi
           
           # Copy to release directory
           mkdir -p release
@@ -188,10 +244,8 @@ jobs:
           
           cp "$SOURCE" "$TARGET"
           
-          # Set executable permissions (Unix)
-          if [[ "${{ matrix.target }}" != *"windows"* ]]; then
-            chmod +x "$TARGET"
-          fi
+          # Set executable permissions
+          chmod +x "$TARGET"
           
           echo "Built: $TARGET"
 
@@ -201,15 +255,11 @@ jobs:
         run: |
           BINARY_NAME="${{ steps.setup.outputs.binary-name }}"
           PLATFORM="${{ matrix.platform }}"
-          TAG="${{ inputs.release-tag }}"
+          TAG="${{ github.ref_name }}"
           
-          # Determine file extensions
+          # All platforms use tar.gz archives
           BINARY_EXT=""
           ARCHIVE_EXT="tar.gz"
-          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            BINARY_EXT=".exe"
-            ARCHIVE_EXT="zip"
-          fi
           
           BINARY_FILE="${BINARY_NAME}-${PLATFORM}${BINARY_EXT}"
           ARCHIVE_NAME="${BINARY_NAME}-${TAG}-${PLATFORM}"
@@ -219,11 +269,7 @@ jobs:
           cp "release/$BINARY_FILE" "temp/$ARCHIVE_NAME/"
           
           cd temp
-          if [[ "$ARCHIVE_EXT" == "zip" ]]; then
-            zip -r "../release/${ARCHIVE_NAME}.zip" "$ARCHIVE_NAME"
-          else
-            tar -czf "../release/${ARCHIVE_NAME}.tar.gz" "$ARCHIVE_NAME"
-          fi
+          tar -czf "../release/${ARCHIVE_NAME}.tar.gz" "$ARCHIVE_NAME"
           cd ..
           rm -rf temp
           
@@ -238,7 +284,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     outputs:
       release-id: ${{ steps.create-release.outputs.id }}
@@ -279,8 +325,8 @@ jobs:
         id: create-release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ inputs.release-tag }}
-          name: Release ${{ inputs.release-tag }}
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
           files: release-assets/*
           generate_release_notes: true
           draft: false
@@ -291,7 +337,7 @@ jobs:
   npm-publish:
     name: Publish to npm
     if: inputs.enable-npm
-    needs: [build, release]
+    needs: [prepare, build, release]
     runs-on: ubuntu-latest
     steps:
       - name: Validate npm inputs
@@ -320,7 +366,7 @@ jobs:
         shell: bash
         run: |
           # Download binaries from GitHub release
-          gh release download ${{ inputs.release-tag }} --dir binaries
+          gh release download ${{ github.ref_name }} --dir binaries
           
           echo "Downloaded binaries:"
           ls -la binaries/
@@ -330,28 +376,41 @@ jobs:
       - name: Create npm package
         shell: bash
         run: |
-          BINARY_NAME="${{ needs.build.outputs.binary-name }}"
+          BINARY_NAME="${{ needs.prepare.outputs.binary-name }}"
           PACKAGE_NAME="${{ inputs.npm-package-name }}"
-          VERSION="${{ inputs.release-tag }}"
+          VERSION="${{ github.ref_name }}"
           
           # Remove 'v' prefix from version if present
           VERSION=${VERSION#v}
           
+          # Auto-detect npm dist-tag from release tag if not specified
+          NPM_DIST_TAG="${{ inputs.npm-dist-tag }}"
+          if [[ -z "$NPM_DIST_TAG" ]]; then
+            RELEASE_TAG="${{ github.ref_name }}"
+            if [[ "$RELEASE_TAG" == *"-alpha"* ]]; then
+              NPM_DIST_TAG="alpha"
+            elif [[ "$RELEASE_TAG" == *"-beta"* ]]; then
+              NPM_DIST_TAG="beta"
+            elif [[ "$RELEASE_TAG" == *"-rc"* ]]; then
+              NPM_DIST_TAG="rc"
+            elif [[ "$RELEASE_TAG" == *"-dev"* ]]; then
+              NPM_DIST_TAG="dev"
+            else
+              NPM_DIST_TAG="latest"
+            fi
+            echo "Auto-detected npm dist-tag: $NPM_DIST_TAG (from release tag: $RELEASE_TAG)"
+          else
+            echo "Using specified npm dist-tag: $NPM_DIST_TAG"
+          fi
+          
           # Create package structure
           mkdir -p npm-package/bin
           
-          # Copy binaries and create wrapper scripts
-          for platform in linux-x86_64 linux-arm64 mac-x86_64 mac-arm64 windows-x86_64; do
-            if [[ "$platform" == "windows-x86_64" ]]; then
-              BINARY_FILE="${BINARY_NAME}-${platform}.exe"
-              if [[ -f "binaries/$BINARY_FILE" ]]; then
-                cp "binaries/$BINARY_FILE" "npm-package/bin/"
-              fi
-            else
-              BINARY_FILE="${BINARY_NAME}-${platform}"
-              if [[ -f "binaries/$BINARY_FILE" ]]; then
-                cp "binaries/$BINARY_FILE" "npm-package/bin/"
-              fi
+          # Copy binaries for supported platforms
+          for platform in linux-x86_64 linux-arm64 mac-arm64; do
+            BINARY_FILE="${BINARY_NAME}-${platform}"
+            if [[ -f "binaries/$BINARY_FILE" ]]; then
+              cp "binaries/$BINARY_FILE" "npm-package/bin/"
             fi
           done
           
@@ -370,10 +429,7 @@ jobs:
             if (platform === 'linux') {
               platformName = arch === 'arm64' ? 'linux-arm64' : 'linux-x86_64';
             } else if (platform === 'darwin') {
-              platformName = arch === 'arm64' ? 'mac-arm64' : 'mac-x86_64';
-            } else if (platform === 'win32') {
-              platformName = 'windows-x86_64';
-              return `BINARY_NAME-${platformName}.exe`;
+              platformName = 'mac-arm64'; // Only ARM64 macOS supported
             } else {
               throw new Error(`Unsupported platform: ${platform}`);
             }
@@ -399,7 +455,7 @@ jobs:
           {
             "name": "${PACKAGE_NAME}",
             "version": "${VERSION}",
-            "description": "${{ inputs.npm-description || format('Command line tool for {0}', needs.build.outputs.binary-name) }}",
+            "description": "${{ inputs.npm-description || format('Command line tool for {0}', needs.prepare.outputs.binary-name) }}",
             "bin": {
               "${PACKAGE_NAME}": "./bin/${PACKAGE_NAME}"
             },
@@ -423,9 +479,26 @@ jobs:
         run: |
           cd npm-package
           
-          # Publish with specified dist-tag
-          npm publish --tag ${{ inputs.npm-dist-tag }}
+          # Use the dist-tag determined in the previous step
+          NPM_DIST_TAG="${{ inputs.npm-dist-tag }}"
+          if [[ -z "$NPM_DIST_TAG" ]]; then
+            RELEASE_TAG="${{ github.ref_name }}"
+            if [[ "$RELEASE_TAG" == *"-alpha"* ]]; then
+              NPM_DIST_TAG="alpha"
+            elif [[ "$RELEASE_TAG" == *"-beta"* ]]; then
+              NPM_DIST_TAG="beta"
+            elif [[ "$RELEASE_TAG" == *"-rc"* ]]; then
+              NPM_DIST_TAG="rc"
+            elif [[ "$RELEASE_TAG" == *"-dev"* ]]; then
+              NPM_DIST_TAG="dev"
+            else
+              NPM_DIST_TAG="latest"
+            fi
+          fi
           
-          echo "Published ${{ inputs.npm-package-name }}@$(cat package.json | jq -r .version) with tag: ${{ inputs.npm-dist-tag }}"
+          # Publish with auto-detected or specified dist-tag
+          npm publish --tag "$NPM_DIST_TAG"
+          
+          echo "Published ${{ inputs.npm-package-name }}@$(cat package.json | jq -r .version) with tag: $NPM_DIST_TAG"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

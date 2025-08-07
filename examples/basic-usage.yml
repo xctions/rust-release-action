@@ -11,8 +11,6 @@ on:
 jobs:
   release:
     uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
-    with:
-      # binary-name automatically uses repository name
-      release-tag: ${{ github.ref_name }}
+    # Uses default platforms: mac-arm64, linux-x86_64, linux-arm64
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -114,9 +114,38 @@ validate_version_tag() {
     fi
     
     # Check for valid semantic version or tag format
-    if [[ ! "$version" =~ ^v?[0-9]+(\.[0-9]+)*(-[a-zA-Z0-9_-]+)?(\+[a-zA-Z0-9_-]+)?$ ]]; then
+    # Simple but effective version validation - allows most common version formats
+    if [[ ! "$version" =~ ^v?[0-9] ]]; then
         echo "Error: Invalid version tag format: $version"
-        echo "Version must follow semantic versioning (e.g., v1.0.0, 1.2.3-beta, v2.0.0-rc.1)"
+        echo "Version must start with a number or 'v' followed by a number"
+        return 1
+    fi
+    
+    # Check for invalid characters (only allow alphanumeric, dots, dashes, plus)
+    if [[ "$version" =~ [^a-zA-Z0-9v.+-] ]]; then
+        echo "Error: Invalid characters in version tag: $version"
+        echo "Version tags can only contain letters, numbers, dots, dashes, and plus signs"
+        return 1
+    fi
+    
+    # Check for invalid patterns
+    if [[ "$version" =~ \.\. ]]; then
+        echo "Error: Invalid version format - double dots not allowed: $version"
+        return 1
+    fi
+    
+    if [[ "$version" =~ -- ]]; then
+        echo "Error: Invalid version format - double dashes not allowed: $version"
+        return 1
+    fi
+    
+    if [[ "$version" =~ -$ ]]; then
+        echo "Error: Invalid version format - cannot end with dash: $version"
+        return 1
+    fi
+    
+    if [[ "$version" =~ \+$ ]]; then
+        echo "Error: Invalid version format - cannot end with plus: $version"
         return 1
     fi
     
@@ -139,7 +168,7 @@ validate_cargo_args() {
     fi
     
     # Check for dangerous characters that could lead to command injection
-    if [[ "$cargo_args" =~ [;\|\&\$\`\(\)><] ]]; then
+    if [[ "$cargo_args" =~ [\;\|\&\$\`\(\)\>\<] ]]; then
         echo "Error: Invalid characters in cargo-args: $cargo_args"
         echo "Cargo args cannot contain: ; | & \$ \` ( ) > <"
         return 1
@@ -148,8 +177,8 @@ validate_cargo_args() {
     # Check for dangerous patterns
     local dangerous_patterns=(
         "rm -rf"
-        "curl.*|"
-        "wget.*|"
+        "curl.*\|"
+        "wget.*\|"
         "nc -"
         "bash -"
         "sh -"

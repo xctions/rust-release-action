@@ -18,13 +18,55 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
     with:
-      release-tag: ${{ github.ref_name }}
       enable-npm: true
       npm-package-name: 'my-cli'
-      npm-dist-tag: 'beta'  # Safe deployment strategy
+      # npm-dist-tag auto-detected from release tag pattern
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+## 🎯 Smart Tag Auto-Detection
+
+The unified workflow automatically detects the appropriate npm dist-tag from your GitHub release tag:
+
+### Auto-Detection Rules
+
+| Release Tag | npm dist-tag | Use Case |
+|-------------|--------------|----------|
+| `v1.0.0` | `latest` | Production release |
+| `v1.0.0-beta.1` | `beta` | Beta testing |
+| `v1.0.0-alpha.1` | `alpha` | Alpha testing |
+| `v1.0.0-rc.1` | `rc` | Release candidate |
+| `v1.0.0-dev.1` | `dev` | Development build |
+
+### How It Works
+
+```bash
+# The workflow checks your release tag pattern:
+if [[ "$RELEASE_TAG" == *"-alpha"* ]]; then
+  NPM_DIST_TAG="alpha"
+elif [[ "$RELEASE_TAG" == *"-beta"* ]]; then
+  NPM_DIST_TAG="beta"
+elif [[ "$RELEASE_TAG" == *"-rc"* ]]; then
+  NPM_DIST_TAG="rc"
+elif [[ "$RELEASE_TAG" == *"-dev"* ]]; then
+  NPM_DIST_TAG="dev"
+else
+  NPM_DIST_TAG="latest"
+fi
+```
+
+### Override Auto-Detection
+
+You can still override the auto-detection when needed:
+
+```yaml
+uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
+with:
+  enable-npm: true
+  npm-package-name: 'my-cli'
+  npm-dist-tag: 'experimental'  # Override auto-detection
 ```
 
 ## ⚠️ npm Unpublish Policy
@@ -94,9 +136,8 @@ graph LR
 
 **Implementation:**
 ```yaml
-# Always publish to beta first
-enable-npm: true
-npm-dist-tag: 'beta'
+# Create beta release tag (auto-detected)
+git tag v1.0.0-beta.1  # → npm-dist-tag: beta
 ```
 
 **Promotion Process:**
@@ -148,10 +189,9 @@ jobs:
   release:
     uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
     with:
-      release-tag: ${{ github.ref_name }}
       enable-npm: true
-      npm-dist-tag: 'beta'  # Safe deployment
       npm-package-name: 'my-cli'
+      # npm-dist-tag auto-detected from release tag
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```
@@ -162,14 +202,13 @@ jobs:
 release:
   uses: xctions/rust-release/.github/workflows/rust-release.yml@v3
   with:
-    release-tag: ${{ github.ref_name }}
     enable-npm: true
-    npm-dist-tag: ${{ 
-      github.ref_name == 'stable' && 'latest' || 
-      contains(github.ref_name, 'alpha') && 'alpha' ||
-      'beta' 
-    }}
     npm-package-name: 'my-cli'
+    # Override auto-detection for special cases
+    npm-dist-tag: ${{ 
+      contains(github.ref_name, 'experimental') && 'experimental' || 
+      '' # Empty string uses auto-detection
+    }}
   secrets:
     NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```
